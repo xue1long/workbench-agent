@@ -1,0 +1,11 @@
+# DevFlow Runtime configuration for Agent Workbench Level 2.
+#
+# Runtime is DISABLED by default — set ``enabled: true`` only in the
+# per-workspace temporary fixture that exercises the bounded live OAuth
+# acceptance scenario. Production workspaces must leave this disabled so
+# ``task run`` refuses to submit any Action.
+enabled: false
+test_command:
+  - node
+  - --test
+  - tests/*.test.mjs
