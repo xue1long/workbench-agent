@@ -14,7 +14,7 @@
 
 - All Level 2 trust boundaries remain: Agent output is `EvidenceClaim`; only Runtime/Verifier output with provenance and `verifier_version` is trusted Evidence; only a valid EventStore `finish` Decision maps to final completion; environment/config mutations stay on Apply outside governed sessions.
 - Pipeline templates are immutable and versioned. Stages are composed of ordinary Level 2 DAG nodes — no second execution engine.
-- Every stage must declare inputs, output artifacts, acceptance criteria, owner, and evidence. A stage with missing or subjective-only acceptance fails validation; acceptance must reference a verifier (`test`, `rule`, `scope`, `diff`, `review`).
+- Every stage must declare inputs, output artifacts, acceptance criteria, owner, and evidence. A stage with missing or subjective-only acceptance fails validation; acceptance kinds reuse the Level 2 verifier set (`test`, `scope`, `diff`, `architecture`, `audit`, `budget`, `dependency`). The Review stage itself compiles to node `kind: 'review'`, which the Level 2 workflow executor already understands.
 - Resume reuses only stages whose definitionHash AND persisted artifact hashes match; completed mutations are never re-applied. Reuse is decided by programmatic hash comparison, not by LLM.
 - Artifact content is never stored in JSONL event rows — only path, sha256, byteCount, kind, scope, and produced-by metadata. Large content lives in files.
 - Knowledge index is append-only; corrections are new records that supersede old ones. Deletion/retention exists before any user document is ingested.
