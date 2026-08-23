@@ -24,7 +24,7 @@
 3. `68e5a5d` feat: add structured candidate lifecycle
 4. `0b35d97` feat: benchmark candidates offline with paired bootstrap
 5. `5896305` feat: enforce approval, canary and rollback
-6. `(pending)` test: establish level 5 acceptance gate
+6. `641a5ad` test: establish level 5 acceptance gate
 
 ## Acceptance Fixtures
 
