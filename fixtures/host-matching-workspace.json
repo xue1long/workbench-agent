@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "workspace": {
+    "id": "HostMatching",
+    "name": "A manifest that already matches the host"
+  },
+  "environment": {
+    "node": { "version": "24" },
+    "python": { "version": "3.14" },
+    "uv": { "version": "0.11.24" }
+  }
+}

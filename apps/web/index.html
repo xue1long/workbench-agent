@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workbench Dashboard</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #10141f; color: #edf2f7; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 15% 0%, #243a56 0, #10141f 42%); }
+    main { width: min(1080px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 64px; }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 32px; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.4rem); letter-spacing: -0.06em; }
+    .eyebrow { color: #7dd3fc; text-transform: uppercase; letter-spacing: .16em; font-size: .75rem; font-weight: 700; }
+    .muted { color: #aab6c7; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    label { color: #aab6c7; font-size: .85rem; }
+    select, button { border: 1px solid #38516b; border-radius: 999px; padding: 10px 16px; background: #182437; color: inherit; cursor: pointer; }
+    select:hover, select:focus-visible, button:hover, button:focus-visible { background: #24405d; outline: 3px solid #38bdf8; outline-offset: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    section { border: 1px solid #293b51; border-radius: 18px; background: #151d2bdb; padding: 20px; box-shadow: 0 16px 40px #05080d44; }
+    h2 { margin: 0 0 16px; font-size: 1rem; color: #c8d5e6; }
+    .status { display: inline-flex; gap: 8px; align-items: center; color: #86efac; font-weight: 700; }
+    .status::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 11px 4px; text-align: left; border-bottom: 1px solid #293b51; }
+    th { color: #8fa2b8; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+    .steps { display: grid; gap: 10px; }
+    .step { display: flex; justify-content: space-between; gap: 16px; border-left: 3px solid #38bdf8; padding: 10px 12px; background: #1a2839; }
+    [hidden] { display: none; }
+    @media (max-width: 640px) { header { display: block; } .controls { margin-top: 18px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="eyebrow" data-i18n="eyebrow">Agent Workbench</div><h1 id="workspace">Loading…</h1><p id="subtitle" class="muted" data-i18n="subtitle">Reading local workspace state</p></div>
+      <div class="controls">
+        <label for="language-select" data-i18n="language">Language</label>
+        <select id="language-select" aria-label="Language">
+          <option value="zh-CN">简体中文</option>
+          <option value="en">English</option>
+        </select>
+        <button id="refresh" type="button" data-i18n="refresh">Refresh status</button>
+      </div>
+    </header>
+    <p id="error" role="alert" hidden></p>
+    <div class="grid">
+      <section aria-labelledby="health-title"><h2 id="health-title" data-i18n="healthTitle">Workspace health</h2><div id="health" class="status">Loading</div></section>
+      <section aria-labelledby="plan-title"><h2 id="plan-title" data-i18n="planTitle">Plan</h2><div id="plan-count" class="muted">Loading</div></section>
+    </div>
+    <section aria-labelledby="resources-title" style="margin-top:16px"><h2 id="resources-title" data-i18n="resourcesTitle">Environment resources</h2><table><thead><tr><th data-i18n="resource">Resource</th><th data-i18n="version">Version</th><th data-i18n="status">Status</th></tr></thead><tbody id="resources"></tbody></table></section>
+    <section aria-labelledby="steps-title" style="margin-top:16px"><h2 id="steps-title" data-i18n="stepsTitle">Execution preview</h2><div id="steps" class="steps"></div></section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

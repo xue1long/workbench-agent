@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "workspace": {
+    "id": "MyWorkspace",
+    "name": "My Agent Workspace"
+  },
+  "environment": {
+    "node": { "version": "22" },
+    "python": { "version": "3.12" },
+    "uv": { "version": "latest" }
+  }
+}

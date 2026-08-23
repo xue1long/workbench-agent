@@ -1,0 +1,15 @@
+{
+  "name": "agent-workbench-runtime",
+  "version": "0.1.0",
+  "description": "Workspace Core (M1+M2+M3+M4) for Agent Workbench — local-first, declarative, reproducible agent environment runtime.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "node src/workbench.mjs"
+  },
+  "dependencies": {}
+}

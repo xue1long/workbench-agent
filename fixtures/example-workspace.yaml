@@ -1,0 +1,15 @@
+# Reference example only. M1 cannot parse YAML (no parser dependency by design).
+# Use fixtures/example-workspace.json as the canonical M1 manifest, or convert
+# this file to JSON before running `workbench plan`. A real YAML loader lands
+# in M2 alongside JSON Schema (ajv) validation.
+version: "1"
+workspace:
+  id: MyWorkspace
+  name: My Agent Workspace
+environment:
+  node:
+    version: "22"
+  python:
+    version: "3.12"
+  uv:
+    version: latest
