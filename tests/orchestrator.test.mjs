@@ -230,3 +230,21 @@ test('runGraph skipNode returning null runs the node normally', async () => {
   assert.equal(invoked, 2);
 });
 
+test('runGraph transformResult rewrites node output before recording', async () => {
+  const deps = makeDeps();
+  const orch = new Orchestrator(deps);
+  const seen = [];
+  const report = await orch.runGraph(makeGraph(), makeTask(), {
+    approveChangeSet: approveAll,
+    transformResult: (node, result) => {
+      seen.push(node.id);
+      return { ...result, output: { ...result.output, artifacts: [{ name: `${node.id}.md` }] } };
+    },
+  });
+  assert.equal(report.finalStatus, 'COMPLETED');
+  assert.deepEqual(seen.sort(), ['design', 'implement']);
+  assert.equal(report.nodes.design.output.artifacts[0].name, 'design.md');
+  assert.equal(report.nodes.implement.output.artifacts[0].name, 'implement.md');
+});
+
+

@@ -96,6 +96,16 @@ export class StateStore {
     return out;
   }
 
+  // ----- generic rows (Level 3 projections) ------------------------------
+  // Pipeline artifacts, pipeline stages, knowledge index and project memory
+  // all ride the same JSONL projection layer. Rows are append-only.
+  appendRow(table, record) {
+    return this._append(table, record);
+  }
+  readRows(table) {
+    return this._readAll(table);
+  }
+
   // ----- workspace --------------------------------------------------------
   saveWorkspace({ id, manifestVersion, manifestPath }) {
     this._assertValidId(id);
