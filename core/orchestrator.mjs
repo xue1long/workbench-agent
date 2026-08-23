@@ -182,7 +182,11 @@ export class Orchestrator {
           ?? await this._createSandbox({ repoRoot: this._deps.repoRoot, runId: `${executionReport.runId}-${nodeId}` });
         try {
           const changeSet = await this._collectChangeSet(sandbox, { baseCommit: sandbox.baseCommit });
-          candidates.push({ nodeId, changeSet });
+          // A node whose work produced no file changes has nothing to govern;
+          // it contributes no candidate (doc stages write artifacts instead).
+          if (Array.isArray(changeSet.edits) && changeSet.edits.length > 0) {
+            candidates.push({ nodeId, changeSet });
+          }
         } finally {
           await sandbox.cleanup();
           nodeSandboxes.delete(nodeId);
