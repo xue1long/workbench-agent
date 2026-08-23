@@ -45,6 +45,42 @@ function defaultRunner(argv, options = {}) {
   });
 }
 
+// Minimal YAML serializer for the simple shape Runtime accepts:
+//   id, version, requirements: [string], acceptances: [{id, verifier_ref, required}],
+//   constraints: [string], arch_rules: [...]
+// Anything beyond this falls back to JSON to keep the adapter functional.
+function intentToYaml(intent) {
+  const lines = [];
+  lines.push(`id: ${yamlScalar(intent.id ?? 'intent')}`);
+  lines.push(`version: ${yamlScalar(intent.version ?? '1.0.0')}`);
+  if (Array.isArray(intent.requirements) && intent.requirements.length > 0) {
+    lines.push('requirements:');
+    for (const r of intent.requirements) lines.push(`  - ${yamlScalar(String(r))}`);
+  } else {
+    lines.push('requirements: []');
+  }
+  if (Array.isArray(intent.acceptances) && intent.acceptances.length > 0) {
+    lines.push('acceptances:');
+    for (const a of intent.acceptances) {
+      lines.push(`  - id: ${yamlScalar(a.id ?? 'acc')}`);
+      lines.push(`    verifier_ref: ${yamlScalar(a.verifier_ref ?? 'diff')}`);
+      lines.push(`    required: ${a.required === false ? 'false' : 'true'}`);
+    }
+  } else {
+    lines.push('acceptances: []');
+  }
+  if (Array.isArray(intent.constraints)) {
+    lines.push('constraints: []');
+  }
+  return lines.join('\n') + '\n';
+}
+
+function yamlScalar(value) {
+  const s = String(value);
+  if (/^[A-Za-z0-9_.\-/:]+$/.test(s)) return s;
+  return JSON.stringify(s);
+}
+
 function parseJsonOutput(stdout) {
   const trimmed = stdout.trim();
   if (!trimmed) throw new DevflowRuntimeError('RUNTIME_OUTPUT_EMPTY', 'Runtime emitted empty stdout');
@@ -68,11 +104,14 @@ function normalizeApproval(approval) {
   return approval;
 }
 
-function buildRuntimeArgs({ command, workspace, intentPath, actionPath, sessionId }) {
+function buildRuntimeArgs({ command, workspace, intentPath, actionPath, sessionId, reuseSession }) {
   const args = ['devflow-runtime', '--workspace', workspace, command];
   if (intentPath) args.push('--intent', intentPath);
   if (actionPath) args.push('--action', actionPath);
-  if (sessionId) args.push('--session', sessionId);
+  // Only forward --session when the caller is explicitly reusing an
+  // existing session. The default Action flow lets Runtime start a new
+  // session tied to the supplied Intent.
+  if (reuseSession && sessionId) args.push('--session', sessionId);
   return args;
 }
 
@@ -119,7 +158,7 @@ export class DevflowRuntimeAdapter {
     return parseJsonOutput(result.stdout);
   }
 
-  async run({ workspace, intent, changeSet, sessionId, approval }) {
+  async run({ workspace, intent, changeSet, sessionId, approval, reuseSession = false }) {
     if (typeof workspace !== 'string' || !workspace.trim()) {
       throw new DevflowRuntimeError('RUNTIME_WORKSPACE_INVALID', 'workspace is required');
     }
@@ -134,11 +173,11 @@ export class DevflowRuntimeAdapter {
     fs.mkdirSync(tempRoot, { recursive: true });
     const intentPath = path.join(tempRoot, `intent-${randomUUID().slice(0, 8)}.yaml`);
     const actionPath = path.join(tempRoot, `action-${randomUUID().slice(0, 8)}.json`);
-    fs.writeFileSync(intentPath, JSON.stringify(intent ?? { id: 'intent', version: '1.0.0' }, null, 2), 'utf8');
+    fs.writeFileSync(intentPath, intentToYaml(intent ?? { id: 'intent', version: '1.0.0' }), 'utf8');
     const action = buildActionPayload({ intent, changeSet, approval: normalizedApproval, sessionId });
     fs.writeFileSync(actionPath, JSON.stringify(action, null, 2), 'utf8');
     try {
-      const args = buildRuntimeArgs({ command: 'run', workspace, intentPath, actionPath, sessionId });
+      const args = buildRuntimeArgs({ command: 'run', workspace, intentPath, actionPath, sessionId, reuseSession });
       const result = await this._runner(args, { shell: false });
       if (result.exitCode !== 0) {
         throw new DevflowRuntimeError('RUNTIME_RUN_FAILED', `devflow-runtime run exited ${result.exitCode}: ${result.stderr}`);
@@ -154,6 +193,7 @@ export class DevflowRuntimeAdapter {
         actionStatus: parsed.status ?? 'unknown',
         blockingReasons: parsed.blocking_reasons ?? [],
         evidenceIds: parsed.evidence_ids ?? [],
+        trustedEvidenceIds: parsed.evidence_ids ?? [],
         decision,
         eventStoreIntegrity: integrity,
         finalStatus,
