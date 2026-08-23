@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import {
   ObservedState,
@@ -577,17 +578,7 @@ async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
     ],
   });
   const registry = new AgentRegistry();
-  const deps = injected ?? {
-    repoRoot: cwd,
-    planner: { plan: async () => graph },
-    invoker: new ProcessAgentInvoker(),
-    changeSandbox: { create: createChangeSandbox, collect: collectChangeSet },
-    runtime: new DevflowRuntimeAdapter({
-      runner: async () => ({ stdout: '{"session":{"id":"s"},"state_revision":1,"status":"applied","blocking_reasons":[],"evidence_ids":[],"decision":{"kind":"finish","reason":"sim"},"event_store_integrity":{"valid":true,"last_sequence":1,"error":null}}', stderr: '', exitCode: 0 }),
-    }),
-    agents: { list: () => registry.list() },
-    audit: { agentSelected: () => {}, toolCalled: () => {}, runtimeDecided: () => {} },
-  };
+  const deps = injected ?? await buildLiveTaskDeps({ cwd, goal, graph, registry, approve, stderr, DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet });
   const orch = new Orchestrator(deps);
   try {
     const report = await orch.runTask(task, { approveChangeSet: approve ? (cs) => ({ approved: true, actor: 'cli', reason: 'go', changeSetSha256: cs.patchSha256 }) : () => ({ approved: false }) });
@@ -599,6 +590,103 @@ async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
     stderr.write(`task run failed: ${err.message}\n`);
     return 1;
   }
+}
+
+// Resolve the Python interpreter that hosts devflow_runtime. Priority:
+// 1. $DFR_PYTHON (absolute path to python.exe)
+// 2. `py -3.11` launcher probe
+// 3. `python` on PATH
+function resolvePython() {
+  if (process.env.DFR_PYTHON) return process.env.DFR_PYTHON;
+  for (const candidate of [
+    ['py', ['-3.11', '-c', 'import sys; print(sys.executable)']],
+    ['python', ['-c', 'import sys; print(sys.executable)']],
+  ]) {
+    try {
+      const res = spawnSync(candidate[0], candidate[1], { encoding: 'utf8', windowsHide: true });
+      if (res.status === 0 && res.stdout.trim()) {
+        const exe = res.stdout.trim();
+        if (fs.existsSync(exe)) return exe;
+      }
+    } catch (_) { /* try next */ }
+  }
+  return null;
+}
+
+function liveRuntimeRunnerFactory(python) {
+  return async (argv) => {
+    // argv: ['devflow-runtime', '--workspace', ws, <command>, ...]
+    const rest = argv.slice(1); // drop the placeholder executable name
+    const { spawn } = await import('node:child_process');
+    return new Promise((resolve, reject) => {
+      const proc = spawn(python, ['-m', 'devflow_runtime.protocol.cli', ...rest], { shell: false, windowsHide: true });
+      let stdout = '';
+      let stderr = '';
+      let stdoutBytes = 0;
+      const MAX_BYTES = 16 * 1024 * 1024;
+      proc.stdout.on('data', (chunk) => {
+        stdoutBytes += chunk.length;
+        if (stdoutBytes > MAX_BYTES) {
+          proc.kill();
+          resolve({ stdout: '', stderr: 'runtime stdout exceeded 16MiB', exitCode: 1 });
+          return;
+        }
+        stdout += chunk.toString('utf8');
+      });
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+      proc.on('error', reject);
+      proc.on('close', (code) => resolve({ stdout, stderr, exitCode: code }));
+    });
+  };
+}
+
+async function buildLiveTaskDeps({ cwd, graph, registry, approve, stderr, DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet }) {
+  const python = resolvePython();
+  if (!python) {
+    stderr.write('workbench task run: could not locate a Python interpreter with devflow_runtime. Set DFR_PYTHON to the absolute path of python.exe.\n');
+    throw new Error('python interpreter not found');
+  }
+  // Apply manifest-declared agents (which may carry invocation) onto the
+  // built-in registry so `task run` can actually drive a process.
+  const manifestPath = path.join(cwd, 'workspace.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (Array.isArray(manifest.agents)) {
+        registry.applyManifest(manifest.agents);
+      }
+    } catch (err) {
+      stderr.write(`workbench task run: could not read ${manifestPath}: ${err.message}\n`);
+    }
+  }
+  const runtime = new DevflowRuntimeAdapter({ runner: liveRuntimeRunnerFactory(python) });
+  // Trust boundary: Runtime is DISABLED by default. Refuse before any Action.
+  let runtimeStatus;
+  try {
+    runtimeStatus = await runtime.status({ workspace: cwd });
+  } catch (err) {
+    stderr.write(`workbench task run: cannot reach devflow-runtime: ${err.message}\n`);
+    throw err;
+  }
+  if (runtimeStatus.enabled !== true) {
+    stderr.write('workbench task run: DevFlow Runtime is disabled for this workspace. Set `enabled: true` in config/runtime.yaml before running a governed task.\n');
+    throw new Error('devflow runtime disabled');
+  }
+  const agents = registry.list();
+  const invokable = agents.filter((a) => a.invocation && typeof a.invocation.executable === 'string');
+  if (invokable.length === 0) {
+    stderr.write('workbench task run: no Agent has an `invocation` configured (executable + args). Declare agents with invocation in workspace.json, or pass injected deps for testing.\n');
+    throw new Error('no invokable agent');
+  }
+  return {
+    repoRoot: cwd,
+    planner: { plan: async () => graph },
+    invoker: new ProcessAgentInvoker(),
+    changeSandbox: { create: createChangeSandbox, collect: collectChangeSet },
+    runtime,
+    agents: { list: () => invokable },
+    audit: { agentSelected: () => {}, toolCalled: () => {}, runtimeDecided: () => {} },
+  };
 }
 
 export async function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), options = null) {

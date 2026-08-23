@@ -84,6 +84,25 @@ Bounded live OAuth acceptance:
 - Raw prompt / context / stdout / stderr fields are replaced by sha256 + byte
   digest metadata before persistence.
 
+## Live CLI Field Acceptance (2026-08-23, second pass)
+
+The `workbench task run` CLI is now wired to the **real** devflow-runtime
+process (no mock runner). Verified in a temporary Git workspace with
+`config/runtime.yaml` set to `enabled: true` and a manifest-declared Agent
+carrying a real `invocation`:
+
+| Scenario | Result |
+| --- | --- |
+| `task run --goal "update README" --approve-changes` | `finalStatus: COMPLETED`, `decision: finish`, `EXECUTION_SUCCEEDED`; README.md changed by the live agent; EventStore integrity `valid: true`; session `finished` |
+| `task run --goal "update README again"` (no approval) | `finalStatus: AWAITING_APPROVAL`, `decision: continue`; EventStore byte count unchanged — no Runtime Action submitted |
+| Runtime disabled workspace | CLI refuses with "DevFlow Runtime is disabled for this workspace. Set `enabled: true` in config/runtime.yaml" |
+| No invokable Agent | CLI refuses with a clear message to declare `invocation` in workspace.json |
+
+This closes the last gap between the unit/integration coverage and the CLI
+surface: the governance path (sandbox → change-set → approval → Runtime
+Action → trusted Evidence → finish) is exercised end-to-end against a real
+`devflow-runtime` process.
+
 ## Known Limits
 
 - The live provider scenario is bounded by the offline oauth-demo fixture;

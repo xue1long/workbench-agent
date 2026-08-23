@@ -88,6 +88,7 @@ export class Orchestrator {
     const agents = (this._deps.agents?.list?.() ?? []);
     const routing = new Map();
     const usedAgentIds = new Set();
+    const nodeSandboxes = new Map();
     const runNode = async (node, ctx) => {
       if (task.deadline && Date.parse(task.deadline) < Date.now()) {
         throw new OrchestratorError('ORCHESTRATOR_DEADLINE_EXPIRED', `deadline passed during ${node.id}`);
@@ -114,6 +115,9 @@ export class Orchestrator {
         reasons: selected.reasons,
       });
       const sandbox = await this._createSandbox({ repoRoot: this._deps.repoRoot, runId: ctx.runId });
+      // Remember this exact worktree so the collect phase reuses the one the
+      // agent actually wrote to (not a fresh empty sandbox).
+      nodeSandboxes.set(node.id, sandbox);
       ctx.sandboxPath = sandbox.sandboxPath;
       const result = await this._deps.invoker.invoke(selected.agent, node, { sandboxPath: sandbox.sandboxPath, prompt: node.goal });
       result.agentId = selected.agent.id;
@@ -123,10 +127,15 @@ export class Orchestrator {
     const candidates = [];
     for (const [nodeId, state] of Object.entries(executionReport.nodes)) {
       if (state.status === 'SUCCEEDED') {
-        const sandbox = await this._createSandbox({ repoRoot: this._deps.repoRoot, runId: `${executionReport.runId}-${nodeId}` });
-        const changeSet = await this._collectChangeSet(sandbox, { baseCommit: sandbox.baseCommit });
-        candidates.push({ nodeId, changeSet });
-        await sandbox.cleanup();
+        const sandbox = nodeSandboxes.get(nodeId)
+          ?? await this._createSandbox({ repoRoot: this._deps.repoRoot, runId: `${executionReport.runId}-${nodeId}` });
+        try {
+          const changeSet = await this._collectChangeSet(sandbox, { baseCommit: sandbox.baseCommit });
+          candidates.push({ nodeId, changeSet });
+        } finally {
+          await sandbox.cleanup();
+          nodeSandboxes.delete(nodeId);
+        }
       }
     }
     if (candidates.length === 0) {
