@@ -79,6 +79,7 @@ export async function evaluate({ run, evaluator, store = null, evidence = null, 
     overall: outcome.overall ?? null,
     deterministic,
     llmJudge: outcome.llmJudge ?? null,
+    extra: outcome.extra ?? null,
     rawEvidence: Object.freeze(rawEvidence),
     evaluatedAt,
   });
