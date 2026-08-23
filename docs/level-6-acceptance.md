@@ -21,7 +21,7 @@
 
 1. `732941d` feat: register intelligence sources and add idempotent ingestion
 2. `a0b89ba` feat: normalize intelligence sources and generate tier-ranked candidate patterns
-3. `(pending)` test: establish level 6 acceptance gate
+3. `2ae597c` test: establish level 6 acceptance gate
 
 ## Acceptance Fixtures
 
