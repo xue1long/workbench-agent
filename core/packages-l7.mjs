@@ -125,6 +125,13 @@ export function uninstallPackage({ store, packageId, version, workspaceRoot }) {
   const installPath = path.join(workspaceRoot, '.workbench', 'installed', packageId);
   if (!fs.existsSync(installPath)) throw new PackageEcosystemError('PACKAGE_NOT_INSTALLED', `${packageId} is not installed`);
   fs.rmSync(installPath, { recursive: true, force: true });
+  // Reverse the verified flag so the package is no longer available until it
+  // passes sandbox verification again.
+  const rows = store.readRows(PACKAGE_TABLE);
+  const latest = rows.filter((r) => r.id === packageId && r.version === version).slice(-1)[0];
+  if (latest && latest.verified) {
+    store.appendRow(PACKAGE_TABLE, { ...latest, verified: false, verifiedAt: null, uninstalledAt: new Date().toISOString() });
+  }
   store.appendRow('package_install', { packageId, version, uninstalledAt: new Date().toISOString() });
   return { packageId, version, uninstalled: true };
 }
