@@ -39,7 +39,7 @@ Notes: every gold item is retrieved in top-5 across all six queries; 0.233 equal
 9. `54cfda7` feat: add retrieval benchmark with precision and coverage
 10. `fa6c8c5` feat: add durable project memory for reviewed knowledge
 11. `8ee06da` feat: wire scoped knowledge into pipeline stages and add knowledge CLI
-12. `(pending)` test: establish level 3 acceptance gate
+12. `e994394` test: establish level 3 acceptance gate
 
 ## Acceptance Fixtures
 
