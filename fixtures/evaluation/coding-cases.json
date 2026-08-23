@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "suite": "coding",
+  "cases": [
+    { "id": "c-01", "kind": "pipeline-standard", "outcome": "success", "cost": 12, "latencyMs": 5000, "goal": "Add OAuth login" },
+    { "id": "c-02", "kind": "pipeline-standard", "outcome": "success", "cost": 11, "latencyMs": 4800, "goal": "Add billing cycle" },
+    { "id": "c-03", "kind": "pipeline-standard", "outcome": "success", "cost": 13, "latencyMs": 5200, "goal": "Add project sync" },
+    { "id": "c-04", "kind": "pipeline-standard", "outcome": "success", "cost": 10, "latencyMs": 4600, "goal": "Add CLI commands" },
+    { "id": "c-05", "kind": "pipeline-standard", "outcome": "success", "cost": 12, "latencyMs": 5100, "goal": "Add config validation" },
+    { "id": "c-06", "kind": "pipeline-standard", "outcome": "test-fail", "cost": 14, "latencyMs": 5600, "goal": "Fix token refresh" },
+    { "id": "c-07", "kind": "pipeline-standard", "outcome": "stage-fail", "cost": 9, "latencyMs": 3800, "goal": "Implement retry policy" },
+    { "id": "c-08", "kind": "pipeline-standard", "outcome": "success", "cost": 11, "latencyMs": 4900, "goal": "Add logging" },
+    { "id": "c-09", "kind": "pipeline-standard", "outcome": "success", "cost": 12, "latencyMs": 5000, "goal": "Add metrics endpoint" },
+    { "id": "c-10", "kind": "pipeline-standard", "outcome": "test-fail", "cost": 15, "latencyMs": 5700, "goal": "Migrate auth storage" },
+    { "id": "c-11", "kind": "pipeline-standard", "outcome": "success", "cost": 10, "latencyMs": 4700, "goal": "Add health check" },
+    { "id": "c-12", "kind": "pipeline-standard", "outcome": "approval", "cost": 8, "latencyMs": 4200, "goal": "Refactor router" },
+    { "id": "c-13", "kind": "pipeline-standard", "outcome": "success", "cost": 13, "latencyMs": 5300, "goal": "Add audit trail" },
+    { "id": "c-14", "kind": "pipeline-standard", "outcome": "stage-fail", "cost": 7, "latencyMs": 3600, "goal": "Add dark mode" },
+    { "id": "c-15", "kind": "pipeline-standard", "outcome": "success", "cost": 11, "latencyMs": 4900, "goal": "Add export feature" }
+  ]
+}

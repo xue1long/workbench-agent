@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "suite": "orchestration",
+  "cases": [
+    { "id": "o-01", "kind": "sequential-success", "outcome": "success", "cost": 2, "latencyMs": 800, "goal": "sequential success" },
+    { "id": "o-02", "kind": "fan-out", "outcome": "success", "cost": 3, "latencyMs": 1200, "goal": "fan out" },
+    { "id": "o-03", "kind": "fan-in", "outcome": "success", "cost": 4, "latencyMs": 1500, "goal": "fan in" },
+    { "id": "o-04", "kind": "retry-success", "outcome": "success", "cost": 5, "latencyMs": 2000, "goal": "retry succeeds" },
+    { "id": "o-05", "kind": "fallback-success", "outcome": "success", "cost": 6, "latencyMs": 2200, "goal": "fallback succeeds" },
+    { "id": "o-06", "kind": "reviewer-success", "outcome": "success", "cost": 7, "latencyMs": 2600, "goal": "reviewer passes" },
+    { "id": "o-07", "kind": "reviewer-replan", "outcome": "success", "cost": 9, "latencyMs": 3400, "goal": "reviewer replan" },
+    { "id": "o-08", "kind": "sequential-success", "outcome": "success", "cost": 1, "latencyMs": 400, "goal": "quick win" },
+    { "id": "o-09", "kind": "fan-out", "outcome": "success", "cost": 3, "latencyMs": 1100, "goal": "two branches" },
+    { "id": "o-10", "kind": "sequential-success", "outcome": "success", "cost": 2, "latencyMs": 700, "goal": "three steps" },
+    { "id": "o-11", "kind": "retry-exhausted", "outcome": "stage-fail", "cost": 8, "latencyMs": 4000, "goal": "retry exhausted" },
+    { "id": "o-12", "kind": "dependency-blocked", "outcome": "blocked", "cost": 2, "latencyMs": 900, "goal": "dependency fails" },
+    { "id": "o-13", "kind": "budget-halt", "outcome": "budget", "cost": 20, "latencyMs": 500, "goal": "budget exhausted" },
+    { "id": "o-14", "kind": "deadline", "outcome": "deadline", "cost": 1, "latencyMs": 300, "goal": "deadline passed" },
+    { "id": "o-15", "kind": "no-candidate", "outcome": "no-candidate", "cost": 1, "latencyMs": 600, "goal": "no changes produced" },
+    { "id": "o-16", "kind": "approval", "outcome": "approval", "cost": 3, "latencyMs": 1300, "goal": "awaiting approval" },
+    { "id": "o-17", "kind": "quarantined", "outcome": "quarantined", "cost": 4, "latencyMs": 1400, "goal": "corrupt store" },
+    { "id": "o-18", "kind": "sequential-success", "outcome": "success", "cost": 2, "latencyMs": 750, "goal": "clean pass" },
+    { "id": "o-19", "kind": "fan-in", "outcome": "success", "cost": 4, "latencyMs": 1600, "goal": "join two" },
+    { "id": "o-20", "kind": "reviewer-replan", "outcome": "success", "cost": 10, "latencyMs": 3600, "goal": "replan once" }
+  ]
+}
