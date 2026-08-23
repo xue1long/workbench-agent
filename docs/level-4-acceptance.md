@@ -37,7 +37,7 @@
 5. `d1e48da` feat: freeze 50-case benchmark baselines
 6. `f41b30b` feat: add evaluation filters to the dashboard
 7. `070af3a` feat: add redacted benchmark exchange and storage gate harness
-8. `(pending)` test: establish level 4 acceptance gate
+8. `1dffc70` test: establish level 4 acceptance gate
 
 ## Acceptance Fixtures
 
