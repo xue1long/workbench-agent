@@ -148,5 +148,20 @@ export class StateStore {
 
   // ----- audit passthrough (AuditLog calls these) -----------------------
   recordAudit(event) { return this._append('audit', event); }
-  listAudit() { return this._readAll('audit'); }
+  /**
+   * List audit rows. The no-arg form preserves historical compatibility.
+   * Filters are optional and combined with AND semantics; ``runId`` and
+   * ``type`` match against the record's top-level fields of the same name.
+   */
+  listAudit({ runId, type } = {}) {
+    const rows = this._readAll('audit');
+    return rows.filter((row) => {
+      if (runId !== undefined && row.runId !== runId) return false;
+      if (type !== undefined) {
+        const rowType = row.type ?? row.kind;
+        if (rowType !== type) return false;
+      }
+      return true;
+    });
+  }
 }

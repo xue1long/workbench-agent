@@ -228,3 +228,154 @@ test('redact never persists Buffer bytes or Error stack with secrets', () => {
   assert.doesNotMatch(dumped, /ghp_secret_bytes/);
   assert.doesNotMatch(dumped, /boom: ghp_secret/);
 });
+
+// ---------- Level 2 Task 2: orchestration projection wrappers ----------
+//
+// Workbench observability must be digest-only for raw prompt / context /
+// stdout / stderr fields. The audit table remains the single projection; we
+// add uppercase orchestration event types and a filterable listAudit.
+
+test('AuditLog.taskCreated emits an uppercase type with run identity', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-l2-audit-'));
+  try {
+    const store = new StateStore({ root: tmp, workspaceId: 'w' });
+    const log = new AuditLog({ workspaceId: 'w', store });
+    const ev = log.taskCreated({ taskId: 't1', runId: 'r1', goal: 'ship it' });
+    assert.equal(ev.type, 'TASK_CREATED');
+    assert.equal(ev.taskId, 't1');
+    assert.equal(ev.runId, 'r1');
+    assert.equal(ev.goal, 'ship it');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AuditLog orchestration wrappers map onto the frozen event vocabulary', () => {
+  const log = new AuditLog({ workspaceId: 'w' });
+  const mapping = [
+    [log.taskPlanned({ taskId: 't', runId: 'r', nodeIds: ['a'] }), 'TASK_PLANNED'],
+    [log.agentSelected({ taskId: 't', runId: 'r', nodeId: 'a', agentId: 'codex', score: 0.5, reasons: ['capability'] }), 'AGENT_SELECTED'],
+    [log.nodeStarted({ taskId: 't', runId: 'r', nodeId: 'a' }), 'AGENT_STARTED'],
+    [log.toolCalled({ taskId: 't', runId: 'r', nodeId: 'a', tool: 'git', argumentsDigest: { sha256: 'abc', bytes: 3 } }), 'TOOL_CALLED'],
+    [log.nodeFinished({ taskId: 't', runId: 'r', nodeId: 'a', status: 'APPLIED', durationMs: 12 }), 'NODE_EXECUTION_SUCCEEDED'],
+    [log.nodeRetried({ taskId: 't', runId: 'r', nodeId: 'a', attempt: 2 }), 'TASK_RETRIED'],
+    [log.nodeFailed({ taskId: 't', runId: 'r', nodeId: 'a', reason: 'verification failed' }), 'TASK_FAILED'],
+    [log.changeSetCreated({ taskId: 't', runId: 'r', patchSha256: 'h', changedFiles: ['a.py'] }), 'CHANGESET_CREATED'],
+    [log.actionProposed({ taskId: 't', runId: 'r', actionId: 'act-1', files: ['a.py'] }), 'ACTION_PROPOSED'],
+    [log.runtimeDecided({ taskId: 't', runId: 'r', sessionId: 's', decision: { kind: 'finish' }, integrity: { valid: true } }), 'RUNTIME_DECIDED'],
+    [log.taskHalted({ taskId: 't', runId: 'r', reason: 'budget exceeded' }), 'TASK_HALTED'],
+    [log.taskQuarantined({ taskId: 't', runId: 'r', reason: 'event store corrupt' }), 'TASK_QUARANTINED'],
+    [log.planRevised({ taskId: 't', runId: 'r', reason: 'reviewer correction', graphRevision: 2 }), 'PLAN_REVISED'],
+  ];
+  for (const [event, type] of mapping) {
+    assert.equal(event.type, type, `wrapper must produce ${type}, got ${event.type}`);
+  }
+});
+
+test('AuditLog.nodeStarted redacts context into a digest and keeps run identity', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-l2-audit-'));
+  try {
+    const store = new StateStore({ root: tmp, workspaceId: 'w' });
+    const log = new AuditLog({ workspaceId: 'w', store });
+    const ev = log.nodeStarted({
+      taskId: 't1',
+      runId: 'r1',
+      nodeId: 'n1',
+      context: { token: 'do-not-store', free: 'ok' },
+    });
+    assert.equal(ev.runId, 'r1');
+    assert.equal(ev.context, undefined);
+    assert.match(ev.contextDigest.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(ev.contextDigest.bytes > 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AuditLog redacts prompt / context / stdout / stderr fields into digests', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-l2-audit-'));
+  try {
+    const store = new StateStore({ root: tmp, workspaceId: 'w' });
+    const log = new AuditLog({ workspaceId: 'w', store });
+    log.record({
+      type: 'RAW_FIELDS_TEST',
+      taskId: 't1',
+      runId: 'r1',
+      prompt: 'system: be careful',
+      context: { token: 'leak' },
+      stdout: 'hello world\n',
+      stderr: 'warning: deprecated\n',
+      summary: 'ok',
+    });
+    const stored = store.listAudit();
+    const last = stored[stored.length - 1];
+    assert.equal(last.prompt, undefined);
+    assert.equal(last.context, undefined);
+    assert.equal(last.stdout, undefined);
+    assert.equal(last.stderr, undefined);
+    assert.match(last.promptDigest.sha256, /^[a-f0-9]{64}$/);
+    assert.match(last.contextDigest.sha256, /^[a-f0-9]{64}$/);
+    assert.match(last.stdoutDigest.sha256, /^[a-f0-9]{64}$/);
+    assert.match(last.stderrDigest.sha256, /^[a-f0-9]{64}$/);
+    // Raw bytes never land on disk.
+    const onDisk = fs.readFileSync(path.join(tmp, 'w', 'audit.jsonl'), 'utf8');
+    assert.doesNotMatch(onDisk, /system: be careful/);
+    assert.doesNotMatch(onDisk, /hello world/);
+    assert.doesNotMatch(onDisk, /deprecated/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('listAudit filters by runId and type while keeping the no-arg call compatible', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-l2-audit-'));
+  try {
+    const store = new StateStore({ root: tmp, workspaceId: 'w' });
+    const log = new AuditLog({ workspaceId: 'w', store });
+    log.taskCreated({ taskId: 't1', runId: 'r1', goal: 'g' });
+    log.taskCreated({ taskId: 't2', runId: 'r2', goal: 'g' });
+    log.nodeFinished({ taskId: 't1', runId: 'r1', nodeId: 'a', status: 'APPLIED', durationMs: 1 });
+
+    const all = store.listAudit();
+    assert.equal(all.length, 3);
+
+    const onlyR1 = store.listAudit({ runId: 'r1' });
+    assert.equal(onlyR1.length, 2);
+    assert.ok(onlyR1.every((e) => e.runId === 'r1'));
+
+    const onlyCreated = store.listAudit({ type: 'TASK_CREATED' });
+    assert.equal(onlyCreated.length, 2);
+    assert.ok(onlyCreated.every((e) => e.type === 'TASK_CREATED'));
+
+    const combined = store.listAudit({ runId: 'r1', type: 'TASK_CREATED' });
+    assert.equal(combined.length, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('AuditLog skips corrupt audit lines without losing healthy ones', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-l2-audit-'));
+  try {
+    const store = new StateStore({ root: tmp, workspaceId: 'w' });
+    const log = new AuditLog({ workspaceId: 'w', store });
+    log.taskCreated({ taskId: 't1', runId: 'r1', goal: 'ok' });
+    fs.appendFileSync(path.join(tmp, 'w', 'audit.jsonl'), '{not json\n', 'utf8');
+    log.taskCreated({ taskId: 't2', runId: 'r2', goal: 'ok' });
+    const events = store.listAudit();
+    assert.equal(events.length, 2);
+    assert.ok(events.every((e) => e.type === 'TASK_CREATED'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('orchestration projection is documented as non-authoritative telemetry', () => {
+  // This test asserts only that the wrapper surface exists; deeper policy
+  // checks live in the orchestrator (Task 10). The audit table is a
+  // rebuildable observability projection; it cannot authorize mutation,
+  // produce trusted Evidence, or declare completion.
+  const log = new AuditLog({ workspaceId: 'w' });
+  assert.equal(typeof log.taskCreated, 'function');
+  assert.equal(typeof log.runtimeDecided, 'function');
+});

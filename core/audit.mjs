@@ -13,7 +13,14 @@
 //
 // Audit records are written to a StateStore's `audit` table; a default
 // file-backed store is constructed when none is provided.
+//
+// Level 2 adds orchestration wrappers that emit uppercase event types and
+// digest raw prompt / context / stdout / stderr fields. The audit table is
+// rebuildable observability telemetry — it cannot authorize mutation, emit
+// trusted Evidence, or declare final completion (those live in DevFlow
+// Runtime's EventStore).
 
+import { createHash } from 'node:crypto';
 import { StateStore } from './store.mjs';
 
 export class AuditLogError extends Error {
@@ -37,7 +44,32 @@ const DEFAULT_REDACT_FIELDS = new Set([
   'session',
 ]);
 
+const RAW_DIGEST_FIELDS = new Set(['prompt', 'context', 'stdout', 'stderr']);
+
 const REDACTED = '***REDACTED***';
+
+export function digestText(value) {
+  if (typeof value !== 'string') {
+    throw new AuditLogError('digestText requires a string', { code: 'AUDIT_BAD_DIGEST_INPUT' });
+  }
+  const buf = Buffer.from(value, 'utf8');
+  return { sha256: createHash('sha256').update(buf).digest('hex'), bytes: buf.length };
+}
+
+function digestRawField(field, value) {
+  const digestName = `${field}Digest`;
+  if (value === undefined) return undefined;
+  if (value === null) {
+    return { [digestName]: { sha256: createHash('sha256').update(Buffer.alloc(0)).digest('hex'), bytes: 0 } };
+  }
+  if (typeof value === 'string') {
+    return { [digestName]: digestText(value) };
+  }
+  // Serialize objects as canonical JSON before digesting so nested values are
+  // hashed without persisting raw bytes.
+  const text = JSON.stringify(value);
+  return { [digestName]: digestText(text) };
+}
 
 /**
  * Recursively redact fields that look like secrets. Returns a NEW object;
@@ -126,13 +158,27 @@ export class AuditLog {
   /**
    * Record one audit event. Returns the redacted record that was written.
    * The store is responsible for durability.
+   *
+   * Raw fields named ``prompt`` / ``context`` / ``stdout`` / ``stderr`` are
+   * replaced by a digest (sha256 + byte count) before persistence; the raw
+   * bytes never touch the JSONL projection. ``kind`` and existing wrappers
+   * continue to work unchanged.
    */
   record(event) {
     if (!event || typeof event !== 'object') {
       throw new AuditLogError('audit event must be an object', { code: 'AUDIT_BAD_EVENT' });
     }
+    const sanitized = { ...event };
+    for (const field of RAW_DIGEST_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(sanitized, field)) {
+        const value = sanitized[field];
+        delete sanitized[field];
+        const digestEntry = digestRawField(field, value);
+        if (digestEntry) Object.assign(sanitized, digestEntry);
+      }
+    }
     const record = redact({
-      ...event,
+      ...sanitized,
       timestamp: event.timestamp ?? new Date().toISOString(),
     }, { fields: this._extraFields });
     this._store.recordAudit(record);
@@ -167,5 +213,59 @@ export class AuditLog {
   }
   rollback({ snapshotId, reason }) {
     return this.record({ kind: 'rollback', snapshotId, reason });
+  }
+
+  // ---- Level 2 orchestration wrappers ---------------------------------
+  // Each wrapper produces a single uppercase ``type`` event. The wrappers
+  // intentionally do not authorize mutation, create trusted Evidence, or
+  // declare final completion; those decisions live in DevFlow Runtime.
+
+  taskCreated({ taskId, runId, goal }) {
+    return this.record({ type: 'TASK_CREATED', taskId, runId, goal });
+  }
+  taskPlanned({ taskId, runId, nodeIds }) {
+    return this.record({ type: 'TASK_PLANNED', taskId, runId, nodeIds: [...nodeIds] });
+  }
+  agentSelected({ taskId, runId, nodeId, agentId, score, reasons }) {
+    return this.record({ type: 'AGENT_SELECTED', taskId, runId, nodeId, agentId, score, reasons: [...reasons] });
+  }
+  nodeStarted({ taskId, runId, nodeId, context }) {
+    return this.record({ type: 'AGENT_STARTED', taskId, runId, nodeId, context });
+  }
+  toolCalled({ taskId, runId, nodeId, tool, argumentsDigest }) {
+    return this.record({ type: 'TOOL_CALLED', taskId, runId, nodeId, tool, argumentsDigest });
+  }
+  nodeFinished({ taskId, runId, nodeId, status, durationMs }) {
+    return this.record({ type: 'NODE_EXECUTION_SUCCEEDED', taskId, runId, nodeId, status, durationMs });
+  }
+  nodeRetried({ taskId, runId, nodeId, attempt, reason }) {
+    return this.record({ type: 'TASK_RETRIED', taskId, runId, nodeId, attempt, reason });
+  }
+  nodeFailed({ taskId, runId, nodeId, reason }) {
+    return this.record({ type: 'TASK_FAILED', taskId, runId, nodeId, reason });
+  }
+  planRevised({ taskId, runId, reason, graphRevision }) {
+    return this.record({ type: 'PLAN_REVISED', taskId, runId, reason, graphRevision });
+  }
+  changeSetCreated({ taskId, runId, patchSha256, changedFiles }) {
+    return this.record({ type: 'CHANGESET_CREATED', taskId, runId, patchSha256, changedFiles: [...changedFiles] });
+  }
+  actionProposed({ taskId, runId, actionId, files }) {
+    return this.record({ type: 'ACTION_PROPOSED', taskId, runId, actionId, files: [...files] });
+  }
+  runtimeDecided({ taskId, runId, sessionId, decision, integrity }) {
+    return this.record({ type: 'RUNTIME_DECIDED', taskId, runId, sessionId, decision, integrity });
+  }
+  taskExecutionSucceeded({ taskId, runId }) {
+    return this.record({ type: 'TASK_EXECUTION_SUCCEEDED', taskId, runId });
+  }
+  taskFailed({ taskId, runId, reason }) {
+    return this.record({ type: 'TASK_FAILED', taskId, runId, reason });
+  }
+  taskHalted({ taskId, runId, reason }) {
+    return this.record({ type: 'TASK_HALTED', taskId, runId, reason });
+  }
+  taskQuarantined({ taskId, runId, reason }) {
+    return this.record({ type: 'TASK_QUARANTINED', taskId, runId, reason });
   }
 }
