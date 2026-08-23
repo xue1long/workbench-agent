@@ -247,4 +247,32 @@ test('runGraph transformResult rewrites node output before recording', async () 
   assert.equal(report.nodes.implement.output.artifacts[0].name, 'implement.md');
 });
 
+test('runGraph nodeContext injects scoped knowledge into the invoker call', async () => {
+  const received = [];
+  const deps = makeDeps({
+    invoker: {
+      invoke: async (agent, node, opts) => {
+        received.push({ node: node.id, knowledge: opts.knowledge ?? null });
+        return {
+          success: true,
+          evidenceClaims: [],
+          output: { id: node.id },
+          cost: 0,
+          usage: {},
+          message: '',
+        };
+      },
+    },
+  });
+  const orch = new Orchestrator(deps);
+  const report = await orch.runGraph(makeGraph(), makeTask(), {
+    approveChangeSet: approveAll,
+    nodeContext: async (node) => (node.id === 'design' ? { knowledge: { items: [{ sourcePath: 'docs/a.md' }], budgetUsed: 10 } } : {}),
+  });
+  assert.equal(report.finalStatus, 'COMPLETED');
+  assert.deepEqual(received.find((r) => r.node === 'design').knowledge.items, [{ sourcePath: 'docs/a.md' }]);
+  assert.equal(received.find((r) => r.node === 'implement').knowledge, null, 'nodes without knowledge get no context');
+});
+
+
 

@@ -577,3 +577,66 @@ test('CLI pipeline status shows recorded stage states', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------- Level 3 Task 10: knowledge + memory CLI ------------------------
+
+import { createKnowledgeStore } from '../core/knowledge-store.mjs';
+import { createProjectMemory } from '../core/project-memory.mjs';
+
+test('CLI knowledge ingest + retrieve round trip with citations', async () => {
+  const root = tmpRoot();
+  try {
+    const docs = path.join(root, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'oauth.md'), '# OAuth login\nredirect token exchange provider scopes\n', 'utf8');
+    fs.writeFileSync(path.join(docs, 'other.md'), 'unrelated text about gardening\n', 'utf8');
+    const ingestOut = [];
+    const ingestCode = await run(['knowledge', 'ingest', '--dir', docs, '--scope', 'repo/'], { write: (c) => ingestOut.push(c) }, { write: () => {} }, root);
+    assert.equal(ingestCode, 0);
+    assert.match(ingestOut.join(''), /ingested: 2/);
+    const retrOut = [];
+    const retrCode = await run(['knowledge', 'retrieve', '--query', 'oauth', '--scope', 'repo/'], { write: (c) => retrOut.push(c) }, { write: () => {} }, root);
+    assert.equal(retrCode, 0);
+    const text = retrOut.join('');
+    assert.match(text, /items: 1/);
+    assert.match(text, /repo\/oauth\.md/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI knowledge benchmark reports precision and coverage', async () => {
+  const root = tmpRoot();
+  try {
+    const docs = path.resolve('fixtures/knowledge/benchmark/documents');
+    const queries = path.resolve('fixtures/knowledge/benchmark/queries.json');
+    const out = [];
+    const code = await run(['knowledge', 'benchmark', '--fixture', docs, '--queries', queries], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    const text = out.join('');
+    assert.match(text, /precisionAt5: 0\.\d+/);
+    assert.match(text, /sourceCoverage: (0\.\d+|1)/);
+    assert.match(text, /q-oauth/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI memory list shows seeded reviewed decisions only', async () => {
+  const root = tmpRoot();
+  try {
+    const store = StateStore.open('default', { root: path.join(root, '.workbench', 'store') });
+    const mem = createProjectMemory({ store, objectsRoot: path.join(root, '.workbench', 'memory', 'objects') });
+    mem.saveDecision({
+      runId: 'r1',
+      decision: { kind: 'decision', reviewed: true, reviewerEvidenceRef: 'ev1', scope: 'src/', source: 'strategy', content: 'use deterministic routing' },
+    });
+    const out = [];
+    const code = await run(['memory', 'list', '--scope', 'src/'], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /decision:strategy/);
+    assert.match(out.join(''), /verifier=-/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

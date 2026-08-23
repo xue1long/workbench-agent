@@ -46,7 +46,7 @@ function validateStage(stage, index, availableInputs, templateInputs) {
   if (!stage || typeof stage !== 'object') {
     throw new PipelineError('PIPELINE_STAGE_INVALID', `stage at index ${index} must be an object`);
   }
-  const { id, name, inputs = [], outputs = [], acceptance = [], owner, evidence = [], scope = null } = stage;
+  const { id, name, inputs = [], outputs = [], acceptance = [], owner, evidence = [], scope = null, knowledge = null } = stage;
   assertNonEmptyString(id, 'PIPELINE_STAGE_ID_INVALID', `stage at index ${index} must have a non-empty id`);
   assertNonEmptyString(name, 'PIPELINE_STAGE_NAME_INVALID', `stage ${id} must have a non-empty name`);
   if (!Array.isArray(inputs)) {
@@ -96,6 +96,23 @@ function validateStage(stage, index, availableInputs, templateInputs) {
   if (scope !== null && (typeof scope !== 'string' || !scope.trim())) {
     throw new PipelineError('PIPELINE_STAGE_SCOPE_INVALID', `stage ${id} scope must be a non-empty string or null`);
   }
+  let validatedKnowledge = null;
+  if (knowledge != null) {
+    if (!knowledge || typeof knowledge !== 'object' || typeof knowledge.query !== 'string' || !knowledge.query.trim()) {
+      throw new PipelineError('PIPELINE_STAGE_KNOWLEDGE_INVALID', `stage ${id} knowledge must declare a non-empty query`);
+    }
+    if (typeof knowledge.scope !== 'string' || !knowledge.scope.trim()) {
+      throw new PipelineError('PIPELINE_STAGE_KNOWLEDGE_INVALID', `stage ${id} knowledge must declare a scope`);
+    }
+    if (knowledge.budgetChars != null && (typeof knowledge.budgetChars !== 'number' || knowledge.budgetChars < 0 || Number.isNaN(knowledge.budgetChars))) {
+      throw new PipelineError('PIPELINE_STAGE_KNOWLEDGE_INVALID', `stage ${id} knowledge.budgetChars must be a non-negative number`);
+    }
+    validatedKnowledge = {
+      query: knowledge.query,
+      scope: knowledge.scope,
+      budgetChars: knowledge.budgetChars ?? 8000,
+    };
+  }
   for (const input of inputs) {
     if (typeof input !== 'string' || !input.trim()) {
       throw new PipelineError('PIPELINE_STAGE_INPUT_INVALID', `stage ${id} has an invalid input reference`);
@@ -113,6 +130,7 @@ function validateStage(stage, index, availableInputs, templateInputs) {
     owner,
     evidence: evidence.map((e) => ({ id: e.id, kind: e.kind })),
     scope,
+    knowledge: validatedKnowledge,
   };
 }
 

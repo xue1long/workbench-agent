@@ -153,7 +153,10 @@ export class Orchestrator {
       // agent actually wrote to (not a fresh empty sandbox).
       nodeSandboxes.set(node.id, sandbox);
       ctx.sandboxPath = sandbox.sandboxPath;
-      const result = await this._deps.invoker.invoke(selected.agent, node, { sandboxPath: sandbox.sandboxPath, prompt: node.goal });
+      const extraContext = typeof options.nodeContext === 'function'
+        ? (await options.nodeContext(node, ctx)) ?? {}
+        : {};
+      const result = await this._deps.invoker.invoke(selected.agent, node, { sandboxPath: sandbox.sandboxPath, prompt: node.goal, ...extraContext });
       result.agentId = selected.agent.id;
       return this._finalize(node, result, options);
     };

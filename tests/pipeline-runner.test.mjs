@@ -12,6 +12,8 @@ import { Orchestrator } from '../core/orchestrator.mjs';
 import { DevflowRuntimeAdapter } from '../adapters/devflow-runtime.mjs';
 import { createPipelineRunner } from '../core/pipeline-runner.mjs';
 import { standardDevelopmentPipeline } from '../core/pipeline-templates.mjs';
+import { definePipeline } from '../core/pipeline.mjs';
+import { createKnowledgeStore } from '../core/knowledge-store.mjs';
 
 function makeRepo(tmp) {
   const r = path.join(tmp, 'repo');
@@ -103,7 +105,7 @@ function makeEnv(overrides = {}) {
   });
   const runner = createPipelineRunner({ orchestrator, store, artifactsRoot });
   const approveAll = (cs) => ({ approved: true, actor: 'human', reason: 'go', changeSetSha256: cs.patchSha256 });
-  return { tmp, repoRoot, store, artifactsRoot, runner, invocations, runtimeCalls, approveAll, invoker };
+  return { tmp, repoRoot, store, artifactsRoot, runner, orchestrator, invocations, runtimeCalls, approveAll, invoker };
 }
 
 const task = (goal) => ({ id: 'p-task', goal });
@@ -247,6 +249,105 @@ test('status returns recorded stage states for a run', async () => {
     assert.equal(Object.keys(status.stages).length, 6);
     assert.equal(status.stages.review.status, 'SUCCEEDED');
     assert.ok(status.stages.requirement.artifactHashes['requirement-notes']);
+  } finally {
+    fs.rmSync(env.tmp, { recursive: true, force: true });
+  }
+});
+
+// ----- Level 3 Task 10: scoped knowledge wiring ---------------------------
+
+function knowledgeTemplate() {
+  return definePipeline({
+    id: 'knowledge-pipe',
+    version: '1.0.0',
+    inputs: ['requirement'],
+    stages: [
+      {
+        id: 'implementation', name: 'Implementation',
+        inputs: ['requirement'], outputs: ['implementation-artifact'],
+        acceptance: [{ id: 'impl-scope', kind: 'scope', required: true }],
+        owner: 'implementation',
+        evidence: [{ id: 'impl-ev', kind: 'diff' }],
+        scope: 'src/',
+        knowledge: { query: 'oauth login', scope: 'src/', budgetChars: 2000 },
+      },
+    ],
+  });
+}
+
+test('pipeline stages receive scoped, cited knowledge context', async () => {
+  const captured = {};
+  const env = makeEnv({
+    invoker: async (agent, node, opts) => {
+      captured[node.id] = opts.knowledge ?? null;
+      return {
+        success: true,
+        evidenceClaims: [{ kind: 'diff', payload: { ref: node.id } }],
+        output: { artifacts: [{ name: STAGE_OUTPUTS[node.id], content: `# ${node.id}\n`, kind: 'md' }] },
+        cost: 0,
+        usage: {},
+        message: 'ok',
+      };
+    },
+  });
+  try {
+    const k = createKnowledgeStore({ store: env.store, objectsRoot: path.join(env.tmp, 'kobjects') });
+    k.ingest({ sourcePath: 'src/auth/oauth.js', kind: 'code', scope: 'src/', content: 'oauth login redirect token exchange implementation' });
+    k.ingest({ sourcePath: 'src/auth/tokens.js', kind: 'code', scope: 'src/', content: 'token refresh storage' });
+    k.ingest({ sourcePath: 'docs/private.md', kind: 'markdown', scope: 'docs/', content: 'secret oauth notes must never reach src stages' });
+    const runner = createPipelineRunner({
+      orchestrator: env.orchestrator,
+      store: env.store,
+      artifactsRoot: env.artifactsRoot,
+      knowledgeStore: k,
+    });
+    const report = await runner.run({ template: knowledgeTemplate(), task: task('Add OAuth login'), approveChangeSet: env.approveAll });
+    assert.equal(report.finalStatus, 'COMPLETED');
+    const knowledge = captured.implementation;
+    assert.ok(knowledge && knowledge.items.length > 0, 'stage must receive knowledge context');
+    assert.ok(knowledge.sources.length > 0, 'knowledge must cite sources');
+    // Hard scope boundary: nothing from docs/ may reach a src/-scoped stage.
+    for (const item of knowledge.items) {
+      assert.ok(item.sourcePath.startsWith('src/'), `scope leak: ${item.sourcePath}`);
+    }
+    assert.equal(report.knowledge.implementation.sources.length, knowledge.sources.length);
+    assert.ok(report.knowledge.implementation.budgetUsed > 0);
+  } finally {
+    fs.rmSync(env.tmp, { recursive: true, force: true });
+  }
+});
+
+test('a stage knowledge scope exceeding its declared scope fails the stage closed', async () => {
+  const env = makeEnv();
+  try {
+    const k = createKnowledgeStore({ store: env.store, objectsRoot: path.join(env.tmp, 'kobjects') });
+    k.ingest({ sourcePath: 'docs/x.md', kind: 'markdown', scope: 'docs/', content: 'x' });
+    const badTemplate = definePipeline({
+      id: 'bad-pipe',
+      version: '1.0.0',
+      inputs: ['requirement'],
+      stages: [
+        {
+          id: 'implementation', name: 'Implementation',
+          inputs: ['requirement'], outputs: ['implementation-artifact'],
+          acceptance: [{ id: 'a', kind: 'scope', required: true }],
+          owner: 'implementation',
+          evidence: [{ id: 'e', kind: 'diff' }],
+          scope: 'src/', // declared scope
+          knowledge: { query: 'oauth', scope: 'docs/' }, // exceeds declared scope
+        },
+      ],
+    });
+    const runner = createPipelineRunner({
+      orchestrator: env.orchestrator,
+      store: env.store,
+      artifactsRoot: env.artifactsRoot,
+      knowledgeStore: k,
+    });
+    const report = await runner.run({ template: badTemplate, task: task('x'), approveChangeSet: env.approveAll });
+    assert.equal(report.executionStatus, 'FAILED');
+    assert.equal(report.stages.implementation.status, 'FAILED');
+    assert.match(report.stages.implementation.message, /exceeds its declared scope/);
   } finally {
     fs.rmSync(env.tmp, { recursive: true, force: true });
   }

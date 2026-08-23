@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { compilePipeline } from './pipeline.mjs';
+import { retrieve } from './knowledge-retrieval.mjs';
 
 export class PipelineRunnerError extends Error {
   constructor(code, message, details = null) {
@@ -38,7 +39,7 @@ function sha256Text(content) {
 }
 
 export class PipelineRunner {
-  constructor({ orchestrator, store, artifactsRoot = null, audit = null }) {
+  constructor({ orchestrator, store, artifactsRoot = null, audit = null, knowledgeStore = null }) {
     if (!orchestrator || typeof orchestrator.runGraph !== 'function') {
       throw new PipelineRunnerError('PIPELINE_ORCHESTRATOR_INVALID', 'createPipelineRunner requires an orchestrator with runGraph');
     }
@@ -51,6 +52,7 @@ export class PipelineRunner {
       ? path.resolve(artifactsRoot)
       : path.resolve(process.cwd(), '.workbench', 'pipelines');
     this._audit = audit ?? null;
+    this._knowledgeStore = knowledgeStore ?? null;
   }
 
   _artifactDir(pipelineId, stageId) {
@@ -215,12 +217,43 @@ export class PipelineRunner {
       return { ...result, output: { ...out, artifacts: refs } };
     };
 
+    // Scoped knowledge wiring: stages that declare `knowledge` receive a
+    // bounded, cited context package through the invoker call. The scope
+    // boundary is enforced twice: the query scope must stay within the
+    // stage's declared scope, and retrieve() applies the hard boundary.
+    let materializedIndex = null;
+    const knowledgeIndex = () => {
+      if (!this._knowledgeStore) return [];
+      if (materializedIndex) return materializedIndex;
+      const rows = this._knowledgeStore.list();
+      materializedIndex = rows.map((row) => ({ ...row, content: this._knowledgeStore.content(row) }));
+      return materializedIndex;
+    };
+    const knowledgeUsage = new Map();
+    const nodeContext = async (node) => {
+      if (typeof options.nodeContext === 'function') {
+        const extra = (await options.nodeContext(node)) ?? {};
+        if (extra.knowledge) return extra;
+      }
+      const stage = stageById.get(node.id);
+      const kn = stage?.knowledge;
+      if (!kn || !this._knowledgeStore) return {};
+      const stageScope = stage.scope ?? '.';
+      if (kn.scope !== '.' && !`${kn.scope}/`.startsWith(`${stageScope.replace(/\/+$/, '')}/`)) {
+        throw new PipelineRunnerError('PIPELINE_KNOWLEDGE_SCOPE', `stage ${node.id} knowledge scope ${kn.scope} exceeds its declared scope ${stageScope}`);
+      }
+      const result = retrieve({ index: knowledgeIndex(), query: kn.query, scope: kn.scope, budgetChars: kn.budgetChars ?? 8000 });
+      knowledgeUsage.set(node.id, { items: result.items.length, budgetUsed: result.budgetUsed, sources: result.sources, scopeCapped: result.scopeCapped });
+      return { knowledge: { items: result.items, budgetUsed: result.budgetUsed, sources: result.sources, scopeCapped: result.scopeCapped } };
+    };
+
     const report = await this._orchestrator.runGraph(graph, task, {
       ...options,
       runId,
       approveChangeSet,
       skipNode,
       transformResult,
+      nodeContext,
     });
 
     const stages = {};
@@ -267,6 +300,7 @@ export class PipelineRunner {
       evidence: stages.review?.evidenceClaims ?? [],
       reviewDecision: reviewState ? { stageId: 'review', status: reviewState.status, message: reviewState.message } : null,
       actionStatus: report.actionStatus ?? null,
+      knowledge: Object.fromEntries(knowledgeUsage),
     };
   }
 
