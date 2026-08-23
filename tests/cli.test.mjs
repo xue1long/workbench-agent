@@ -301,3 +301,128 @@ test('CLI surfaces a clean ManifestError on invalid manifest', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------- task subcommand (Level 2) ------------------------------------
+
+function makeTaskGraphPayload() {
+  return {
+    task: { id: 't-cli', goal: 'ship it' },
+    nodes: [
+      { id: 'a', goal: 'a', acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+      { id: 'b', goal: 'b', dependencies: ['a'], acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+    ],
+  };
+}
+
+test('CLI task validate accepts a valid graph file', async () => {
+  const root = tmpRoot();
+  try {
+    const file = path.join(root, 'graph.json');
+    fs.writeFileSync(file, JSON.stringify(makeTaskGraphPayload()), 'utf8');
+    const out = [];
+    const code = await run(['task', 'validate', '--file', file], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /2 node\(s\)/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI task validate rejects a cyclic graph file', async () => {
+  const root = tmpRoot();
+  try {
+    const file = path.join(root, 'graph.json');
+    fs.writeFileSync(file, JSON.stringify({
+      task: { id: 't', goal: 'g' },
+      nodes: [
+        { id: 'a', goal: 'a', dependencies: ['b'], acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+        { id: 'b', goal: 'b', dependencies: ['a'], acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+      ],
+    }), 'utf8');
+    const err = [];
+    const code = await run(['task', 'validate', '--file', file], { write: () => {} }, { write: (c) => err.push(c) }, root);
+    assert.equal(code, 2);
+    assert.match(err.join(''), /cycle/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI task simulate runs a deterministic graph', async () => {
+  const root = tmpRoot();
+  try {
+    const file = path.join(root, 'graph.json');
+    fs.writeFileSync(file, JSON.stringify(makeTaskGraphPayload()), 'utf8');
+    const out = [];
+    const code = await run(['task', 'simulate', '--file', file], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /EXECUTION_SUCCEEDED/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI task simulate rejects out-of-range concurrency', async () => {
+  const root = tmpRoot();
+  try {
+    const file = path.join(root, 'graph.json');
+    fs.writeFileSync(file, JSON.stringify(makeTaskGraphPayload()), 'utf8');
+    const err = [];
+    const code = await run(['task', 'simulate', '--file', file, '--concurrency', '99'], { write: () => {} }, { write: (c) => err.push(c) }, root);
+    assert.equal(code, 2);
+    assert.match(err.join(''), /concurrency/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI task run requires a Git working copy', async () => {
+  const root = tmpRoot();
+  try {
+    const err = [];
+    const code = await run(['task', 'run', '--goal', 'noop'], { write: () => {} }, { write: (c) => err.push(c) }, root);
+    assert.equal(code, 2);
+    assert.match(err.join(''), /Git/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI task run without --approve-changes preserves candidate and returns AWAITING_APPROVAL', async () => {
+  const root = tmpRoot();
+  try {
+    fs.writeFileSync(path.join(root, 'README.md'), 'init\n');
+    const { spawnSync } = await import('node:child_process');
+    spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    spawnSync('git', ['config', 'user.email', 'cli@l'], { cwd: root });
+    spawnSync('git', ['config', 'user.name', 'cli'], { cwd: root });
+    spawnSync('git', ['add', '.'], { cwd: root });
+    spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: root });
+    // Inject mock dependencies so the CLI run does not require live agents
+    // or a real DevFlow Runtime invocation.
+    const mockDeps = {
+      repoRoot: root,
+      planner: { plan: async () => ({
+        task: { id: 'cli-task', goal: 'noop', inputHash: 'h'.repeat(64) },
+        nodes: [{ id: 'plan', goal: 'noop', definitionHash: 'h'.repeat(64), dependencies: [], capabilityRequired: 'coding', requiredTools: [], acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] }],
+        nodeIds: ['plan'],
+        graphHash: 'h'.repeat(64),
+      }) },
+      invoker: { invoke: async () => ({ success: true, evidenceClaims: [], output: {}, cost: 0, usage: {}, message: '' }) },
+      changeSandbox: {
+        create: async () => ({ repoRoot: root, sandboxPath: root, runId: 'r', baseCommit: 'h', async cleanup() {} }),
+        collect: async () => ({ runId: 'r', baseCommit: 'h', patchSha256: 'a'.repeat(64), changedFiles: ['README.md'], edits: [{ path: 'README.md', content: 'init\n', expectedDigest: '', changeType: 'replace' }], sandboxPath: root }),
+      },
+      runtime: { run: async () => ({ sessionId: 's', stateRevision: 0, actionStatus: 'applied', blockingReasons: [], evidenceIds: [], decision: { kind: 'halt', reason: 'no Runtime call' }, eventStoreIntegrity: { valid: true, last_sequence: 0, error: null }, finalStatus: 'AWAITING_APPROVAL' }) },
+      agents: { list: () => [{ id: 'mock', capabilities: ['coding'], tools: [], maxRisk: 'low', maxContextTokens: 32000 }] },
+      audit: { agentSelected: () => {}, toolCalled: () => {}, runtimeDecided: () => {} },
+    };
+    const out = [];
+    const code = await run(['task', 'run', '--goal', 'noop'], { write: (c) => out.push(c) }, { write: () => {} }, root, { deps: mockDeps });
+    assert.notEqual(code, 0);
+    assert.match(out.join(''), /finalStatus/);
+    assert.match(out.join(''), /AWAITING_APPROVAL/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

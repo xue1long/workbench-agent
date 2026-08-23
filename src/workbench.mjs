@@ -490,7 +490,118 @@ async function runRollback(argv, stdout, stderr, cwd) {
   }
 }
 
-export async function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = process.stderr, cwd = process.cwd()) {
+function printTaskHelp(stdout) {
+  stdout.write(`Usage: workbench task <command> [options]\n\nCommands:\n  validate --file <path>          Validate a TaskGraph JSON file\n  simulate --file <path> [--concurrency N]    Simulate execution\n  run --goal <text> [--concurrency N] [--approve-changes]    Run a governed task\n`);
+  return 0;
+}
+
+async function loadTaskFromFile(pathArg) {
+  if (!fs.existsSync(pathArg)) {
+    throw new Error(`task file not found: ${pathArg}`);
+  }
+  return JSON.parse(fs.readFileSync(pathArg, 'utf8'));
+}
+
+async function runTaskValidate(rest, stdout, stderr, cwd) {
+  const fileIdx = rest.indexOf('--file');
+  if (fileIdx < 0) {
+    stderr.write('workbench task validate requires --file <path>\n');
+    return 2;
+  }
+  try {
+    const { createTaskGraph } = await import('../core/task-graph.mjs');
+    const payload = await loadTaskFromFile(rest[fileIdx + 1]);
+    const graph = createTaskGraph(payload);
+    stdout.write(`task graph ok: ${graph.nodes.length} node(s)\n`);
+    return 0;
+  } catch (err) {
+    stderr.write(`task validation failed: ${err.message}\n`);
+    return 2;
+  }
+}
+
+async function runTaskSimulate(rest, stdout, stderr, cwd) {
+  const fileIdx = rest.indexOf('--file');
+  if (fileIdx < 0) {
+    stderr.write('workbench task simulate requires --file <path>\n');
+    return 2;
+  }
+  let concurrency = 1;
+  const cIdx = rest.indexOf('--concurrency');
+  if (cIdx >= 0) {
+    const v = Number.parseInt(rest[cIdx + 1], 10);
+    if (!Number.isInteger(v) || v < 1 || v > 16) {
+      stderr.write('workbench task simulate --concurrency must be an integer in [1,16]\n');
+      return 2;
+    }
+    concurrency = v;
+  }
+  try {
+    const { createTaskGraph } = await import('../core/task-graph.mjs');
+    const { executeWorkflow } = await import('../core/workflow-runtime.mjs');
+    const payload = await loadTaskFromFile(rest[fileIdx + 1]);
+    const graph = createTaskGraph(payload);
+    const report = await executeWorkflow(graph, async (node) => ({ success: true, output: { id: node.id }, evidenceClaims: [], cost: 0, usage: {}, message: 'simulated' }), { concurrency });
+    stdout.write(`executionStatus: ${report.executionStatus}\nnodes: ${Object.keys(report.nodes).length}\ncost: ${report.cost}\n`);
+    return report.executionStatus === 'EXECUTION_SUCCEEDED' ? 0 : 1;
+  } catch (err) {
+    stderr.write(`task simulation failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
+  const goalIdx = rest.indexOf('--goal');
+  if (goalIdx < 0) {
+    stderr.write('workbench task run requires --goal <text>\n');
+    return 2;
+  }
+  const goal = rest[goalIdx + 1];
+  const approve = rest.includes('--approve-changes');
+  const { createTask, createTaskGraph } = await import('../core/task-graph.mjs');
+  const { Orchestrator } = await import('../core/orchestrator.mjs');
+  const { DevflowRuntimeAdapter } = await import('../adapters/devflow-runtime.mjs');
+  const { ProcessAgentInvoker } = await import('../adapters/process-agent.mjs');
+  const { AgentRegistry } = await import('../core/agents.mjs');
+  const { createChangeSandbox, collectChangeSet } = await import('../core/change-sandbox.mjs');
+  if (!fs.existsSync(path.join(cwd, '.git'))) {
+    stderr.write('workbench task run requires a Git working copy\n');
+    return 2;
+  }
+  const task = createTask({ id: `cli-${Date.now()}`, goal });
+  const graph = createTaskGraph({
+    task,
+    nodes: [
+      { id: 'plan', goal: 'plan the task', acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] },
+      { id: 'implement', goal: 'implement', dependencies: ['plan'], acceptanceCriteria: [{ id: 'im', verifierRef: 'diff', required: true }] },
+    ],
+  });
+  const registry = new AgentRegistry();
+  const deps = injected ?? {
+    repoRoot: cwd,
+    planner: { plan: async () => graph },
+    invoker: new ProcessAgentInvoker(),
+    changeSandbox: { create: createChangeSandbox, collect: collectChangeSet },
+    runtime: new DevflowRuntimeAdapter({
+      runner: async () => ({ stdout: '{"session":{"id":"s"},"state_revision":1,"status":"applied","blocking_reasons":[],"evidence_ids":[],"decision":{"kind":"finish","reason":"sim"},"event_store_integrity":{"valid":true,"last_sequence":1,"error":null}}', stderr: '', exitCode: 0 }),
+    }),
+    agents: { list: () => registry.list() },
+    audit: { agentSelected: () => {}, toolCalled: () => {}, runtimeDecided: () => {} },
+  };
+  const orch = new Orchestrator(deps);
+  try {
+    const report = await orch.runTask(task, { approveChangeSet: approve ? (cs) => ({ approved: true, actor: 'cli', reason: 'go', changeSetSha256: cs.patchSha256 }) : () => ({ approved: false }) });
+    stdout.write(`finalStatus: ${report.finalStatus}\ndecision: ${report.decision.kind}\nexecutionStatus: ${report.executionStatus}\n`);
+    if (report.finalStatus === 'COMPLETED') return 0;
+    if (report.finalStatus === 'QUARANTINED') return 3;
+    return 1;
+  } catch (err) {
+    stderr.write(`task run failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+export async function run(argv = process.argv.slice(2), stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), options = null) {
   const [command, subcommand, ...rest] = argv;
   if (!command || command === '--help' || command === '-h') {
     printHelp(stdout);
@@ -506,6 +617,10 @@ export async function run(argv = process.argv.slice(2), stdout = process.stdout,
     if (command === 'init') return runInit(argv, stdout, stderr, cwd);
     if (command === 'status') return await runStatus(argv, stdout, stderr, cwd);
     if (command === 'project' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'project');
+    if (command === 'task' && subcommand === 'validate') return await runTaskValidate(rest, stdout, stderr, cwd);
+    if (command === 'task' && subcommand === 'simulate') return await runTaskSimulate(rest, stdout, stderr, cwd);
+    if (command === 'task' && subcommand === 'run') return await runTaskRun(rest, stdout, stderr, cwd, options?.deps);
+    if (command === 'task' && subcommand === 'help') return printTaskHelp(stdout) || 0;
     if (command === 'agent' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'agent');
     if (command === 'mcp' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'mcp');
     if (command === 'package' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'package');
