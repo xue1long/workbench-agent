@@ -38,6 +38,7 @@
 
 **Interfaces:**
 - Records: Git commit, Node version, pnpm version, OS, `npm test` count, and the SHA-256 digest of `package.json` before migration.
+- Produces: `runBaselineSuite() -> { code, tests, pass, fail, tap, tapSha256 }`, called twice by the baseline writer.
 
 - [ ] **Step 1: Freeze the approved design revision**
 
@@ -68,19 +69,21 @@
 
   Expected: Node starts with `v24.`, pnpm is callable, and Git exits 0. Record the current pnpm version even when it differs; Task 2 activates repository-pinned pnpm 11.7.0 through Corepack without installing a global package.
 
-- [ ] **Step 4: Run the accepted suite twice**
+- [ ] **Step 4: Implement and run the accepted suite twice**
 
-  Run twice:
+  `write-baseline.mjs` calls `spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'tests/*.test.mjs'])` twice with `shell: false`, writes each complete TAP stream under `.dsh-compat-runs/baseline/`, and parses the terminal lines `1..414`, `# pass 414`, and `# fail 0`. It throws before writing Markdown unless both child exit codes are zero and both parsed summaries equal `{ tests: 414, pass: 414, fail: 0 }`.
+
+  Run:
 
   ```powershell
-  npm test
+  node spikes/dsh-compat/write-baseline.mjs
   ```
 
-  Expected each time: 414 passing tests and zero failures. A sandbox-only `spawn EPERM` is an environment denial: rerun the same suite outside the process sandbox and record both outputs. A real test failure stops the plan.
+  Expected: two TAP files plus `baseline.md`; each TAP digest is recorded in the Markdown. A sandbox-only `spawn EPERM` is an environment denial: rerun the same command outside the process sandbox. A real test failure stops the plan.
 
 - [ ] **Step 5: Write `docs/dsh-compatibility/baseline.md`**
 
-  `write-baseline.mjs` uses `execFileSync` with literal argv arrays and `createHash('sha256')` to collect the six command-derived values, verifies the two recorded suite results are `414/414`, and writes this Markdown shape through `writeFile`:
+  `write-baseline.mjs` uses `execFileSync` with literal argv arrays and `createHash('sha256')` to collect the command-derived values, includes the two returned TAP digests, and writes this Markdown shape through `writeFile`:
 
   ```js
   const markdown = `# DSH Compatibility Baseline
@@ -89,14 +92,16 @@
   - Node: ${nodeVersion}
   - pnpm: ${pnpmVersion}
   - OS: ${platform} ${arch}
-  - Existing suite: 414/414, two clean runs
+  - Existing suite: ${runs[0].pass}/${runs[0].tests}, two clean runs
+  - Baseline run 1 TAP SHA-256: ${runs[0].tapSha256}
+  - Baseline run 2 TAP SHA-256: ${runs[1].tapSha256}
   - package.json SHA-256: ${packageDigest}
   - Design commit: ${designCommit}
   - Design SHA-256: ${designDigest}
   `
   ```
 
-  Run `node spikes/dsh-compat/write-baseline.mjs`, then inspect the generated file before committing it.
+  Inspect the generated file and both ignored TAP files before committing it.
 
 - [ ] **Step 6: Commit**
 
@@ -116,7 +121,8 @@
 
 **Interfaces:**
 - Produces: `requiredProbeIds` — frozen array of every hard gate.
-- Produces: `normalizeProbeResult({ probeId, version, status, observations, artifacts })`.
+- Produces: `normalizeProbeResult(input: ProbeResultInput) -> ProbeResult` with the exact schema below.
+- Produces: `normalizeRunManifest({ runId, version, mode, results }) -> RunManifest` with schema `workbench-dsh-run-1`, mode `legacy-state|target|upgrade`, probe results sorted by ID, and one computed manifest `evidenceDigest`.
 - Produces: `decideVersion(results, version) -> { version, decision: 'PROMOTE'|'REJECT', failures, evidenceDigest }`.
 - Produces: `decideCore({ targetResults, legacyStateResults, upgradeResults }) -> { decision: 'PROMOTE'|'HOLD'|'REJECT_DSH_CORE', selectedVersion, isolationMode, upgradeProven, failedProbeIds, reasonClass }`.
 
@@ -137,7 +143,7 @@
   ]
   ```
 
-  Test that a missing result, `SKIP`, duplicate probe ID, version mismatch, or any status except `PASS` rejects the target. Test that `PROMOTE` requires all rc.2 probes, successful rc.8 legacy-state creation, and successful rc.2 reopening. An rc.8 hard-gate failure does not reject rc.2. Classify a missing public extension seam as `REJECT_DSH_CORE`; classify a target release regression as `HOLD`.
+  Test that a missing result, `SKIP`, duplicate probe ID, version mismatch, `INCONCLUSIVE`, or `FAIL` rejects the target. A run manifest rejects an invalid run ID, duplicate result, mixed version/spec/lockfile identity, wrong mode/version pair, unknown field, or caller-supplied digest. `target` requires exactly all 21 IDs; `legacy-state` and `upgrade` require their explicit probe subsets declared by the runner. Test that `PROMOTE` requires all rc.2 probes, successful rc.8 legacy-state creation, and successful rc.2 reopening. An rc.8 hard-gate failure does not reject rc.2. `reasonClass: 'architectural-seam'` produces `REJECT_DSH_CORE`; `release-specific` or `environment` produces `HOLD`.
 
 - [ ] **Step 2: Verify the test fails**
 
@@ -147,20 +153,45 @@
 
 - [ ] **Step 3: Implement the minimum evidence module**
 
-  Use `node:crypto`, canonical JSON keys sorted recursively, and no dependency. A result has this shape:
+  Use `node:crypto`, canonical JSON keys sorted recursively, and no dependency. Reject unknown fields and enforce this exact shape:
 
   ```js
   {
     schema: 'workbench-dsh-probe-1',
     probeId: 'web-boot',
     version: '0.1.1-rc.2',
-    status: 'PASS',
+    status: 'PASS', // PASS | FAIL | INCONCLUSIVE
+    reasonClass: null, // null | release-specific | architectural-seam | environment
+    specCommit: '0123456789abcdef0123456789abcdef01234567',
+    specSha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    lockfileDigests: {
+      root: '1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      install: '2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    },
     observations: [{ name: 'loopback', value: '127.0.0.1' }],
-    artifacts: [{ path: 'web/stdout.txt', sha256: '...' }]
+    artifacts: [{
+      path: 'web/stdout.txt',
+      sha256: '3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    }]
   }
   ```
 
-  Reject unknown fields so evidence cannot silently change meaning.
+  Require `reasonClass === null` only for `PASS`; require a non-null reason for `FAIL` and `INCONCLUSIVE`. Digest fields are lowercase 64-character hex, commit is lowercase 40-character hex, artifact paths are relative POSIX paths without `..`, and observation names are unique. Compute `evidenceDigest` over the normalized object rather than accepting it from input.
+
+  `normalizeRunManifest` emits this exact outer shape and computes its digest after normalizing every result:
+
+  ```js
+  {
+    schema: 'workbench-dsh-run-1',
+    runId: 'target-rc2-run-1',
+    version: '0.1.1-rc.2',
+    mode: 'target',
+    results: Object.freeze(normalizedResults),
+    evidenceDigest: digestCanonical({ schema, runId, version, mode, results: normalizedResults })
+  }
+  ```
+
+  Tests compare the digest to an independently canonicalized SHA-256.
 
 - [ ] **Step 4: Ignore generated runs, not fixtures**
 
@@ -169,7 +200,7 @@
   ```gitignore
   # DSH compatibility probe output
   .dsh-compat-runs/
-  spikes/dsh-compat/.installed/
+  spikes/dsh-compat/installs/*/node_modules/
   ```
 
 - [ ] **Step 5: Run focused and full tests**
@@ -307,18 +338,19 @@
 - Create: `spikes/dsh-compat/lib/process.mjs`
 - Create: `spikes/dsh-compat/lib/run-context.mjs`
 - Create: `spikes/dsh-compat/run.mjs`
+- Create: `docs/dsh-compatibility/evidence/README.md`
 - Create: `tests/dsh-compat-runner.test.mjs`
 
 **Interfaces:**
-- Produces: `createRunContext({ version, root }) -> { runId, dshHome, candidateRepo, canonicalRepo, evidenceDir, env }`.
+- Produces: `createRunContext({ version, root, runId? }) -> { runId, dshHome, candidateRepo, canonicalRepo, evidenceDir, env }`; an explicit ID must match `/^[a-z0-9][a-z0-9-]{0,63}$/` and its directory must not exist.
 - Produces: `runCommand(file, args, { cwd, env, timeoutMs }) -> { code, stdout, stderr, timedOut }`.
 - Produces: `snapshotTree(root) -> [{ path, kind, mode, sha256 }]` without following symlinks.
-- Produces: `writeEvidenceManifest(result, committedDir) -> { path, sha256 }`, rejecting secrets, absolute local paths, and artifact paths outside the run root.
-- CLI: `node spikes/dsh-compat/run.mjs --version 0.1.0-rc.8|0.1.1-rc.2|all --out .dsh-compat-runs`.
+- Produces: `writeEvidenceManifest(manifest, committedDir) -> { path, sha256 }`, accepting only a normalized `workbench-dsh-run-1` manifest and rejecting secrets, absolute local paths, and artifact paths outside the run root.
+- CLI example: `node spikes/dsh-compat/run.mjs --version 0.1.1-rc.2 --mode target --run-id target-rc2-run-1 --out .dsh-compat-runs`; version/mode mismatch is rejected.
 
 - [ ] **Step 1: Write failing runner tests**
 
-  Cover argument rejection, unique run directories, owner-separated dsh homes, timeout termination, stdout/stderr capture, symlink-safe tree snapshots, and cleanup limited to the created temporary root.
+  Cover argument rejection, generated unique run directories, accepted fixed run IDs, fixed-ID collision rejection, owner-separated dsh homes, timeout termination, stdout/stderr capture, symlink-safe tree snapshots, and cleanup limited to the created temporary root.
 
 - [ ] **Step 2: Verify failure**
 
@@ -332,7 +364,7 @@
 
   ```js
   const canarySecret = `wb-canary-${randomBytes(24).toString('hex')}`
-  const env = {
+  const env = Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot,
     TEMP: runTemp,
@@ -340,18 +372,30 @@
     DSH_HOME: dshHome,
     WORKBENCH_CANARY_SECRET: canarySecret,
     NO_COLOR: '1'
-  }
+  }).filter(([, value]) => typeof value === 'string' && value.length > 0))
   ```
 
   Import `randomBytes` from `node:crypto`. Do not copy API keys, home-directory variables, npm tokens, or the caller's full environment. Keep `canarySecret` only in memory and pass it directly to the final scanner.
 
 - [ ] **Step 4: Add fixture Git repositories**
 
-  The runner creates `canonicalRepo`, commits `tracked.txt` containing `canonical\n`, then creates `candidateRepo` using the isolation mode under test. Record before/after snapshots for canonical working tree and `.git` separately.
+  The runner creates `canonicalRepo`, writes `tracked.txt` containing `canonical\n`, and commits without reading global Git identity:
+
+  ```js
+  await runCommand('git', ['init'], { cwd: canonicalRepo, env, timeoutMs: 10_000 })
+  await runCommand('git', ['add', 'tracked.txt'], { cwd: canonicalRepo, env, timeoutMs: 10_000 })
+  await runCommand('git', [
+    '-c', 'user.name=Workbench Spike',
+    '-c', 'user.email=spike@invalid.local',
+    'commit', '-m', 'fixture baseline'
+  ], { cwd: canonicalRepo, env, timeoutMs: 10_000 })
+  ```
+
+  Then create `candidateRepo` using the isolation mode under test. Record before/after snapshots for canonical working tree and `.git` separately.
 
 - [ ] **Step 5: Write durable redacted evidence**
 
-  Store raw logs only under the template-literal path ``.dsh-compat-runs/${runId}``. Store the normalized, secret-scanned result at ``docs/dsh-compatibility/evidence/${runId}.json``; include `specCommit`, `specSha256`, both relevant lockfile digests, raw-artifact relative paths and SHA-256 digests, but no absolute machine path or raw content.
+  `docs/dsh-compatibility/evidence/README.md` documents `workbench-dsh-probe-1`, committed versus ignored artifacts, and the digest verification command. Store raw logs only under the template-literal path ``.dsh-compat-runs/${runId}``. Store normalized, secret-scanned results at ``docs/dsh-compatibility/evidence/${runId}.json`` only during Task 10; Task 3 unit tests write evidence beneath their temporary directory, never into the repository.
 
 - [ ] **Step 6: Run focused and full suites**
 
@@ -363,7 +407,7 @@
 - [ ] **Step 7: Commit**
 
   ```powershell
-  git add spikes/dsh-compat/lib spikes/dsh-compat/run.mjs tests/dsh-compat-runner.test.mjs docs/dsh-compatibility/evidence
+  git add spikes/dsh-compat/lib spikes/dsh-compat/run.mjs tests/dsh-compat-runner.test.mjs docs/dsh-compatibility/evidence/README.md
   git commit -m "test: add disposable dsh compatibility runner"
   ```
 
@@ -485,7 +529,13 @@
 
 **Files:**
 - Modify: `spikes/dsh-compat/fixtures/workbench-spike/package.json`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/remote-host.ts`
 - Create: `spikes/dsh-compat/fixtures/workbench-spike/client.ts`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/tsconfig.host.json`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/tsconfig.client.json`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/tsdown.config.mjs`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/client-bundle.mjs`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/playwright.config.mjs`
 - Create: `spikes/dsh-compat/fixtures/workbench-spike/compat.mjs`
 - Modify: `spikes/dsh-compat/fixtures/workbench-spike/host.mjs`
 - Create: `spikes/dsh-compat/probes/web-extensions.mjs`
@@ -493,8 +543,9 @@
 - Create: `tests/dsh-compat-web.spec.mjs`
 
 **Interfaces:**
-- Host Remote method: `workbenchSpike.ping` returns `{ value: 'pong', actorSource, requestId }` and ignores any actor field supplied by the caller.
+- `WorkbenchSpikeRemote extends TypertRemoteService`; `@Remote('ping') ping(request: { requestId: string }): Promise<{ value: 'pong'; actorSource: string; requestId: string }>` is generated under namespace `workbenchSpike`. Its strict generated codec rejects unknown request fields, including `actor`.
 - Client contribution registers one route, one Settings Card, and one Conversation Node renderer bearing stable test IDs.
+- `buildClientBundle({ entry, output, packageId, externals })` emits the documented lazy CommonJS registration `window.__ModuleLoader__.load({ id, factory })`; it rejects non-allowlisted value imports instead of bundling Host code.
 - Probe emits `web-client-plugin`, `remote-call`, `conversation-node`, and `settings-card`.
 
 - [ ] **Step 1: Write failing contract tests**
@@ -507,9 +558,9 @@
   node --test tests/dsh-compat-web-extensions.test.mjs
   ```
 
-- [ ] **Step 3: Implement only the four extension contributions**
+- [ ] **Step 3: Generate the strict Remote projection before compiling Client**
 
-  Materialization writes exact version-matched dependencies and a `build:client` script using the published dsh client build contract. The package declares:
+  Materialization writes exact candidate-matched dsh dependencies plus `typescript: 6.0.3`, `tsdown: 0.22.14`, `@deepseek-ai/dsh-typert-generator: 0.1.1-rc.2`, `react: 18.3.1`, and `@types/react: 18.3.1`; no caret or workspace range is allowed. If rc.8 cannot consume the rc.2 generator, record that only as an rc.8 observation because rc.2 is the target gate. The package declares:
 
   ```json
   {
@@ -530,7 +581,26 @@
   }
   ```
 
-  Build `client.ts` into the closure-factory `lib/client.js`, then assert the Web boot graph serves that exact file digest. The page renders these literal markers:
+  `remote-host.ts` exports `WorkbenchSpikeRemote` and uses only JSON wire types. `tsdown.config.mjs` imports `defineConfig` from `tsdown` and `typertPlugin` from `@deepseek-ai/dsh-typert-generator/tsdown`; it reads `DSH_SPIKE_FACE`, accepts only `host` or `client`, selects `remote-host.ts` plus `typertPlugin({ mode: 'package', faces: ['host'] })` for Host, and selects `client.ts` for Client. Run this fixed order:
+
+  ```powershell
+  corepack pnpm --dir spikes/dsh-compat/fixtures/workbench-spike exec tsc -p tsconfig.host.json --noEmit
+  $env:DSH_SPIKE_FACE = 'host'
+  corepack pnpm --dir spikes/dsh-compat/fixtures/workbench-spike exec tsdown --config tsdown.config.mjs
+  corepack pnpm --dir spikes/dsh-compat/fixtures/workbench-spike exec tsc -p tsconfig.client.json --noEmit
+  $env:DSH_SPIKE_FACE = 'client'
+  corepack pnpm --dir spikes/dsh-compat/fixtures/workbench-spike exec tsdown --config tsdown.config.mjs
+  Remove-Item Env:DSH_SPIKE_FACE
+  node spikes/dsh-compat/fixtures/workbench-spike/client-bundle.mjs
+  ```
+
+  The Host phase uses `typertPlugin({ mode: 'package', faces: ['host'] })` and must produce `lib/typert.host.js`, `lib/typert.host.d.ts`, `lib/typert.remote-client.js`, `lib/typert.remote-client.d.ts`, and its source map. The Client phase imports the package's public `./remote` export, never Host declarations. Extend `exports` with `./remote: ./lib/typert.remote-client.js` and `./typert: ./lib/typert.host.js`; `host.mjs` registers the compiled Host service and its generated Typert artifact through Cordis effects.
+
+- [ ] **Step 4: Build the four Client contributions without a private dsh preset**
+
+  The official external-package surface does not publish the repository-internal `clientBundle` preset. `client-bundle.mjs` is therefore an explicitly test-only compatibility builder: it reads the Client phase's `lib/client.cjs`, permits value imports only from the two declared Client injections, rejects `@deepseek-ai/*` Host imports and absolute/package-internal paths, wraps the result in `window.__ModuleLoader__.load({ id: '@workbench/dsh-spike', factory })`, and writes `lib/client.js` with `flag: 'wx'` after deleting only its known prior output. Its unit test executes the factory against a fake loader and verifies one disposer for each registration.
+
+  Assert the Web boot graph serves the exact SHA-256 of `lib/client.js`. The page renders these literal markers:
 
   ```html
   <section data-testid="workbench-spike-page">pong</section>
@@ -540,7 +610,9 @@
 
   `spikes/dsh-compat/fixtures/workbench-spike/compat.mjs` contains only the version-keyed public import and registration names used by rc.8 and rc.2. It throws on every other version and may not import `src/`, `lib/private`, or a filesystem path inside an installed package.
 
-- [ ] **Step 4: Install Chromium for the pinned test runner**
+- [ ] **Step 5: Pin the browser project and install Chromium**
+
+  `playwright.config.mjs` imports `fileURLToPath` and sets `testDir: fileURLToPath(new URL('../../../../tests', import.meta.url))`, `workers: 1`, and exactly one project named `chromium` with `devices['Desktop Chrome']`. The command below is invalid unless that config first loads and lists the named project.
 
   ```powershell
   corepack pnpm exec playwright install chromium
@@ -548,19 +620,19 @@
 
   Record the Playwright and Chromium revisions in the evidence manifest.
 
-- [ ] **Step 5: Run a real browser and Remote probe**
+- [ ] **Step 6: Run a real browser and Remote probe**
 
   `tests/dsh-compat-web.spec.mjs` boots Web on loopback, launches Chromium, waits for the dsh loading screen to settle, opens the contributed route, and asserts the three test IDs. It invokes `workbenchSpike.ping` through the browser's real Remote client with the server-issued local session. It then sends `actor: 'forged'`, a foreign `Origin`, and a mutation without the issued CSRF value; each must be rejected or retain the server-derived actor.
 
-- [ ] **Step 6: Verify rendered registration and Conversation replay**
+- [ ] **Step 7: Verify rendered registration and Conversation replay**
 
   Append the fixture Session start/end events, reload the page, and assert `data-testid="workbench-spike-conversation-node"` renders the replayed terminal state. Each stable test ID must appear in the real DOM. A package that merely loads or serves JavaScript but cannot render receives `FAIL`.
 
-- [ ] **Step 7: Run tests and commit**
+- [ ] **Step 8: Run tests and commit**
 
   ```powershell
   corepack pnpm test:dsh-compat
-  corepack pnpm exec playwright test tests/dsh-compat-web.spec.mjs --project=chromium --workers=1
+  corepack pnpm exec playwright test tests/dsh-compat-web.spec.mjs --config=spikes/dsh-compat/fixtures/workbench-spike/playwright.config.mjs --project=chromium
   corepack pnpm test
   git add spikes/dsh-compat/fixtures/workbench-spike spikes/dsh-compat/probes/web-extensions.mjs tests/dsh-compat-web-extensions.test.mjs tests/dsh-compat-web.spec.mjs
   git commit -m "test: probe dsh web extension contracts"
@@ -572,12 +644,14 @@
 
 **Files:**
 - Create: `spikes/dsh-compat/probes/execution-world.mjs`
+- Create: `spikes/dsh-compat/fixtures/workbench-spike/execution-gate.mjs`
 - Create: `tests/dsh-compat-execution-world.test.mjs`
 
 **Interfaces:**
 - Probe emits `workspace-access`, `agent-subagent-candidate-binding`, `git-admin-denial`, and `sandbox-boundary`.
 - Produces: `selectIsolationMode(results) -> 'detached-worktree'|'full-clone'`; worktree wins only if every shared-Git escape attempt is denied, otherwise full clone must pass.
 - Produces: `inventoryExecutionCapabilities(profileDump) -> [{ id, installed, agentVisible, provider }]`; an absent optional capability passes only when the boot graph proves it is not Agent-visible.
+- Test-only `ExecutionGate.run({ mode, checkpointDigest }, operation)` accepts `mode: 'read-only'|'mutating'`; an omitted or unknown mode is mutating. Readers overlap only on the same immutable checkpoint, a writer is exclusive, and a failed writer awaits `restore(checkpointDigest)` before releasing its lock.
 
 - [ ] **Step 1: Write failing selection and snapshot tests**
 
@@ -617,16 +691,20 @@
 
   First test a detached worktree. Reject it if the Agent can reach the shared Git administration link by any capability. Then test a disposable full clone with independent `.git`. If the full clone cannot contain every capability, the version fails Phase 0.
 
-- [ ] **Step 5: Prove checkpoint restoration and read-only overlap**
+- [ ] **Step 5: Implement the smallest test-only execution gate**
 
-  Run a mutating attempt that writes then fails; restore the Workbench-owned content checkpoint and assert no change remains. Run two declared read-only attempts against one immutable checkpoint and assert both lack mutating providers. Attempt overlap between read-only and mutating modes and assert the scheduler refuses it. This validates dsh can be constrained; it does not implement the later governed-task scheduler.
+  Do not claim the current Workbench already has the later governed-task scheduler. `execution-gate.mjs` is a Phase 0 fixture with one process-local reader/writer queue and an injected `restore` callback. It exposes only `run`; it has no persistence, priority, cancellation, or distributed locking. Tests hold operations on deferred Promises to prove same-checkpoint readers overlap, different-checkpoint readers serialize, writers exclude all readers, undeclared modes receive mutating providers, and restoration finishes before a failed writer's successor starts.
 
-- [ ] **Step 6: Run tests and commit**
+- [ ] **Step 6: Prove checkpoint restoration and read-only overlap through dsh**
+
+  Run a mutating dsh attempt through `ExecutionGate` that writes then fails; restore the Workbench-owned content checkpoint and assert no change remains. Run two declared read-only dsh attempts against one immutable checkpoint and assert both lack mutating providers. Attempt overlap between read-only and mutating modes and assert the fixture queues it. This proves the dsh provider graph can be switched at an execution boundary; production scheduling remains Plan 2 work.
+
+- [ ] **Step 7: Run tests and commit**
 
   ```powershell
   corepack pnpm test:dsh-compat
   corepack pnpm test
-  git add spikes/dsh-compat/probes/execution-world.mjs tests/dsh-compat-execution-world.test.mjs
+  git add spikes/dsh-compat/probes/execution-world.mjs spikes/dsh-compat/fixtures/workbench-spike/execution-gate.mjs tests/dsh-compat-execution-world.test.mjs
   git commit -m "test: prove dsh candidate execution isolation"
   ```
 
@@ -645,6 +723,9 @@
 
 **Interfaces:**
 - Produces: `scanForSecret({ roots, outputs, secret }) -> Finding[]`, inspecting text and binary byte sequences without following links.
+- `EncryptedSessionPersistence extends SessionPersistence` implements all nine public members: `locate`, `create`, `append`, `prepare`, `load`, `inspect`, `readFrom`, `list`, and `listSnapshots`; its TypeScript compilation against each candidate's exported declarations is a gate and no member may use `any`. Fixture-only `setPinned(id, pinned)`, `deleteSession(id)`, and `expireSessions({ now, maxAgeMs })` supply the three Workbench retention operations without changing dsh's seam.
+- The Storage fixture registers one candidate-exported SQLite `StorageBackend` as `workbench-spike`, opens a `workbench_spike` version-1 domain through `ctx.storageDomain`, and uses one `dispatches` table; it does not create a second storage API.
+- `createLocalAuth({ consumeLaunchToken, issueSession, deriveActor })` accepts a launch credential exactly once from the `Authorization: Bearer launchToken` header, then issues the browser cookie and CSRF value. No cookie is issued merely because a loopback request arrived.
 - Probe emits `session-encryption`, `secret-redaction`, `storage-atomicity`, `storage-locking`, `storage-recovery`, `storage-provider-registration`, `web-approval-identity`, `headless-approval-identity`, and `distinct-approval-semantics`.
 
 - [ ] **Step 1: Write failing scanner and gate tests**
@@ -659,7 +740,9 @@
 
 - [ ] **Step 3: Implement the throwaway encrypted Session provider**
 
-  Register through the public Session Persistence provider seam. Encrypt each canonical Session record independently with AES-256-GCM, a fresh 12-byte nonce from `randomBytes`, and authenticated metadata `{ installationId, sessionId, sequence, eventType, schema }`. Store the 32-byte installation key in the isolated dsh home with owner-only permissions. Redact credential values before serialization. This provider is a feasibility fixture and must stay under `spikes/`; Plan 2 decides the production implementation.
+  Register `EncryptedSessionPersistence` as the sole `ctx.sessionPersistence` provider through the public seam. Its nine methods preserve dsh semantics: `create` durably writes one immutable header before resolving; `append` accepts only the next contiguous sequence and makes the complete batch durable; `prepare` reuses the cold read and commits interrupted-tail repair before publication; `load` and `inspect` return the same logical event stream while `inspect` does not publish or rewrite; `readFrom` returns the physical suffix from the requested sequence; `list` and `listSnapshots` are metadata-only observations; `locate` returns the independent encrypted artifact path. Reuse candidate-exported Session types and run `tsc --noEmit` against both candidates so a signature drift fails materialization.
+
+  Encrypt each canonical header/event record independently with AES-256-GCM, a fresh 12-byte nonce from `randomBytes`, and authenticated metadata `{ installationId, sessionId, sequence, eventType, schema }`. Store the installation key at `<DSH_HOME>/workbench-spike/session.key` and ciphertext at `<DSH_HOME>/workbench-spike/sessions/`. On POSIX create the directory with `0700` and the key using `open(path, 'wx', 0o600)`. On Windows create the key with `open(path, 'wx')`, invoke `icacls` with `shell: false` and argument array `[path, '/inheritance:r', '/grant:r', `${userInfo().username}:(F)`]`, then parse `icacls path` and fail if `Everyone`, `BUILTIN\\Users`, or `Authenticated Users` has an ACE. Never continue after an ACL command or verification failure. Redact credential values before serialization. This provider stays under `spikes/`; Plan 2 decides the production implementation.
 
 - [ ] **Step 4: Probe Session confidentiality and redaction**
 
@@ -671,17 +754,21 @@
   - restart with the same installation key recovers sessions;
   - restart without the key refuses access without deleting ciphertext;
   - model-visible messages and persisted events never contain the value;
-  - retention, deletion, and pinning operate on encrypted records.
+  - `setPinned`, `deleteSession`, and `expireSessions` operate only on encrypted artifacts, reject an active Session, and durably update the provider's encrypted metadata before returning.
 
   First prove the shipping provider's observed behavior, then activate the throwaway provider entirely through the out-of-tree Bundle. If the replacement cannot become the sole Session persistence path without a Host patch, record `session-encryption: FAIL` and `reasonClass: architectural-seam`.
 
 - [ ] **Step 5: Implement and probe the throwaway Storage provider**
 
-  `storage-provider.mjs` follows the public backend lifecycle: `ctx.storage.backend.register('workbench-spike', backend)` inside `ctx.effect`, publishes its lifecycle service key, and closes after unregistering. Back it with the shipping SQLite backend where its public contract provides the required operations; add only the minimal transaction/idempotency wrapper the public seam requires. Run concurrent compare-and-set/transaction attempts, process-kill recovery, workspace isolation, schema marker creation, and idempotent replay. Missing atomicity, lock exclusion, recovery, or provider replacement is `FAIL`.
+  Do not implement a backend. `storage-provider.mjs` constructs the candidate's public SQLite `StorageBackend`, registers it with `ctx.storage.backend.register('workbench-spike', backend)` inside `ctx.effect`, publishes `storageBackendServiceKey('workbench-spike')`, routes only the fixture domain to it, and disposes in this order: close domain, unregister backend, await `backend.close()`. Compilation pins the exact public contract: `StorageBackend.close()`, optional `kv.open(descriptor)`, and returned `KvUnit.loadAll()`, `putRecord()`, `deleteRecord()`, `setGlobal()`, and `close()`.
+
+  Declare the fixture data via `defineDomain({ name: 'workbench_spike', version: 1, tables: { dispatches: domainTable<string, DispatchEnvelope>(z.object({ schema: z.literal('workbench-dispatch-probe-1'), actionId: z.string().min(1), actionDigest: z.string().regex(/^[0-9a-f]{64}$/), idempotencyKey: z.string().min(1), devflowSessionId: z.string().min(1), candidateDigest: z.string().regex(/^[0-9a-f]{64}$/), state: z.enum(['DISPATCHING', 'CONFIRMED', 'QUARANTINED']) }).strict()) } })` and access it only through `ctx.storageDomain.open(spec)`, `table.get/entries/put/delete/update`, and `domain.close()`. Pin the candidate-resolved `zod` package exactly in the fixture manifest. Run concurrent `update` attempts, SQLite cross-process writer contention, forced process termination followed by reopen, workspace-key isolation, schema/application marker validation, and idempotent replay. Missing durability, lock exclusion, recovery, routing, or clean provider replacement is `FAIL`.
 
 - [ ] **Step 6: Implement and probe trusted approval identity**
 
-  `local-auth.mjs` first consumes a verified dsh local-auth actor when exposed. Otherwise it generates a launch-scoped 32-byte credential, returns it only in an HttpOnly `SameSite=Strict` cookie, stores its CSRF value in browser memory from an authenticated bootstrap response, and excludes both from URLs and logs. Web binds loopback and derives actor server-side. Headless derives the operating-system principal for interactive approval; non-interactive approval requires fixture automation identity `workbench-spike-ci` authenticated by a separate environment reference. Caller-provided names are rejected or ignored.
+  `local-auth.mjs` first consumes a verified dsh local-auth actor when exposed. Otherwise it generates a launch-scoped 32-byte token and stores only its SHA-256 server-side. The first bootstrap request must present the raw token as `Authorization: Bearer launchToken`; compare digests with `timingSafeEqual`, atomically mark it consumed, then issue `workbench-spike-session=sessionValue` with `HttpOnly; SameSite=Strict; Path=/` and return a distinct CSRF value in the authenticated response body. `launchToken` and `sessionValue` name runtime-generated byte strings, not literals. Add `Secure` when the probed dsh Web origin is HTTPS; for its HTTP loopback origin the test records that transport limitation instead of emitting an invalid `__Host-` cookie. A missing, wrong, or second-use token receives `401` and no cookie. Playwright uses `extraHTTPHeaders` only for this exchange, then creates a new context containing only the cookie; every mutation requires that cookie, the CSRF header, and an allowed loopback `Origin`.
+
+  Tokens, cookie values, and CSRF values are excluded from URLs, browser storage, evidence, and logs. Web binds loopback and derives actor server-side. Headless derives the operating-system principal for interactive approval; non-interactive approval requires fixture automation identity `workbench-spike-ci` authenticated by a separate environment reference. Caller-provided actor names are rejected or ignored.
 
 - [ ] **Step 7: Probe non-substitutable approvals**
 
@@ -706,12 +793,14 @@
 
 **Files:**
 - Create: `spikes/dsh-compat/probes/devflow-recovery.mjs`
+- Create: `spikes/dsh-compat/lib/dispatch-outbox.mjs`
 - Create: `tests/dsh-compat-devflow-recovery.test.mjs`
 
 **Interfaces:**
 - Probe emits `devflow-dispatch-recovery`.
 - Uses the existing real DevFlow stable protocol, not a second fake business implementation.
 - Recovery uses the existing caller-known `sessionId` through `DevflowRuntimeAdapter.recover({ workspace, sessionId })`; the Action retains its stable workspace-scoped idempotency key for identical delivery rejection inside DevFlow.
+- `createDispatch(table, envelope)`, `transitionDispatch(table, actionId, expectedState, nextState)`, `loadDispatch(table, actionId)`, and `reconcileDispatch(table, adapter, workspace, actionId)` are the complete probe outbox API. States are `DISPATCHING`, `CONFIRMED`, and `QUARANTINED`; all transitions use the Storage domain's serialized `table.update` and reject a stale expected state.
 
 - [ ] **Step 1: Bind the existing stable protocol and write failing integration tests**
 
@@ -723,9 +812,9 @@
   node --test tests/dsh-compat-devflow-recovery.test.mjs
   ```
 
-- [ ] **Step 3: Implement only the probe adapter**
+- [ ] **Step 3: Persist the probe outbox through the Task 7 Storage domain**
 
-  The probe persists this exact envelope before dispatch:
+  `createDispatch` performs `table.put(actionId, envelope)` and awaits durability before the DevFlow call. A duplicate key is accepted only when `actionDigest`, `idempotencyKey`, `devflowSessionId`, and `candidateDigest` all match; otherwise it rejects. The persisted envelope is:
 
   ```js
   {
@@ -739,18 +828,18 @@
   }
   ```
 
-  After restart it calls `recover({ workspace, sessionId: devflowSessionId })` before any retry and validates EventStore integrity. An unknown outcome becomes `QUARANTINED`; it is never guessed as success or retried with a new key.
+  `transitionDispatch` uses `table.update` to compare the durable `state` before replacement. `loadDispatch` returns one immutable snapshot. After restart `reconcileDispatch` calls `recover({ workspace, sessionId: devflowSessionId })` before any retry and validates EventStore integrity. A matching trusted Decision changes `DISPATCHING` to `CONFIRMED`; an unknown or conflicting outcome changes it to `QUARANTINED`. It is never guessed as success or retried with a new key. No JSON-file writer or second database is permitted.
 
-- [ ] **Step 4: Drive the adapter from a dsh Host plugin lifecycle**
+- [ ] **Step 4: Drive crash cuts from child processes**
 
-  Start dispatch, terminate the dsh process at each cut point, restart with the same dsh home, reconcile, and assert exactly one logical Action and one trusted final Decision in DevFlow.
+  The probe child accepts only `DSH_SPIKE_CUT=before-request|after-outbox|after-accept|after-confirmation`. At the selected hook it emits `CUT_READY <name>` after the preceding durable operation, then waits; the parent kills that PID, reopens the same dsh home and Storage domain, and reconciles. Start dispatch through a dsh Host plugin lifecycle at all four cuts and assert exactly one logical Action and one trusted final Decision in DevFlow. The test fails if a hook fires before its documented commit point or if reopening requires deleting WAL/lock files.
 
 - [ ] **Step 5: Run tests and commit**
 
   ```powershell
   corepack pnpm test:dsh-compat
   corepack pnpm test
-  git add spikes/dsh-compat/probes/devflow-recovery.mjs tests/dsh-compat-devflow-recovery.test.mjs
+  git add spikes/dsh-compat/probes/devflow-recovery.mjs spikes/dsh-compat/lib/dispatch-outbox.mjs tests/dsh-compat-devflow-recovery.test.mjs
   git commit -m "test: probe dsh devflow dispatch recovery"
   ```
 
@@ -762,14 +851,29 @@
 - Create: `spikes/dsh-compat/probes/supply-chain.mjs`
 - Create: `spikes/dsh-compat/supply-chain-exceptions.json`
 - Create: `tests/dsh-compat-supply-chain.test.mjs`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/inventory.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/integrity.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/licenses.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/audit.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/osv-aliases.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/kev.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.0-rc.8/THIRD_PARTY_NOTICES.txt`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/inventory.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/integrity.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/licenses.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/audit.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/osv-aliases.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/kev.json`
+- Generate: `docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2/THIRD_PARTY_NOTICES.txt`
 
 **Interfaces:**
-- Produces per-version immutable artifacts: package inventory, lockfile digest, registry integrity values, license inventory, generated third-party notices, npm advisory report, and CISA KEV correlation.
+- `resolveAdvisoryAliases(audit) -> [{ advisoryId, aliases, osvDigest }]` resolves every GHSA through `https://api.osv.dev/v1/vulns/<GHSA>` and records all CVE aliases; an unresolved advisory makes the supply-chain result `INCONCLUSIVE`, never “not in KEV”.
+- Produces the seven named immutable artifacts per version: package inventory, lockfile/registry integrity, license inventory, npm advisory report, OSV alias resolution, CISA KEV correlation, and generated third-party notices.
 - Vulnerability decision rejects known-exploited, Critical, and applicable High findings; every accepted lower finding requires owner, rationale, and expiry.
 
 - [ ] **Step 1: Write failing policy tests**
 
-  Test Critical/High rejection, KEV rejection at any severity, expired exception rejection, missing license/notice rejection, exact version enforcement, and lockfile-integrity mismatch rejection. `supply-chain-exceptions.json` begins as `[]`; the probe never creates exceptions.
+  Test Critical/High rejection, direct-CVE and GHSA-to-CVE KEV rejection at any severity, unresolved alias rejection, expired exception rejection, missing license/notice rejection, exact version enforcement, and lockfile-integrity mismatch rejection. `supply-chain-exceptions.json` begins as `[]`; the probe never creates exceptions.
 
 - [ ] **Step 2: Verify failure**
 
@@ -788,7 +892,9 @@
   corepack pnpm install --frozen-lockfile
   ```
 
-  Repeat these commands independently under `installs/rc8` and `installs/rc2`. Fetch `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`, store its retrieval time and SHA-256, and join audit CVEs against `vulnerabilities[].cveID`. Generate `THIRD_PARTY_NOTICES.txt` deterministically from package name, exact version, SPDX expression, repository, and included license text. Normalize volatile timestamps out of JSON before hashing. Do not auto-create vulnerability exceptions.
+  Repeat these commands independently under `installs/rc8` and `installs/rc2`. Extract both CVE and GHSA identifiers from the audit. Resolve each GHSA with OSV, require a stable response for every query, and union the returned CVE aliases. Fetch `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`, store retrieval time plus raw SHA-256, and join the complete CVE set against `vulnerabilities[].cveID`. Preserve the normalized OSV responses and their digests in `osv-aliases.json`; a network/parse/missing-alias failure is `INCONCLUSIVE` and blocks promotion.
+
+  Generate each `THIRD_PARTY_NOTICES.txt` deterministically from package name, exact version, SPDX expression, repository, actual included license-file name, license-file SHA-256, and license text. Reject missing or ambiguous license files instead of inventing notice text. Normalize volatile timestamps out of JSON before hashing. Write all seven artifacts with `flag: 'wx'` into the exact version directory, secret-scan them, and commit them only in Task 10. Do not auto-create vulnerability exceptions.
 
 - [ ] **Step 4: Run tests and commit**
 
@@ -807,8 +913,13 @@
 - Create: `docs/dsh-compatibility/0.1.0-rc.8.md`
 - Create: `docs/dsh-compatibility/0.1.1-rc.2.md`
 - Create: `docs/dsh-compatibility/decision.md`
+- Create: `docs/dsh-compatibility/evidence/legacy-rc8-run-1.json`
+- Create: `docs/dsh-compatibility/evidence/legacy-rc8-run-2.json`
+- Create: `docs/dsh-compatibility/evidence/target-rc2-run-1.json`
+- Create: `docs/dsh-compatibility/evidence/target-rc2-run-2.json`
 - Create: `docs/dsh-compatibility/evidence/upgrade-run-1.json`
 - Create: `docs/dsh-compatibility/evidence/upgrade-run-2.json`
+- Commit: all generated files under `docs/dsh-compatibility/evidence/supply-chain/`
 - Conditionally create: `spikes/dsh-compat/selected-version.json`
 
 **Interfaces:**
@@ -823,10 +934,10 @@
   corepack pnpm install --frozen-lockfile
   corepack pnpm --dir spikes/dsh-compat/installs/rc8 install --frozen-lockfile --ignore-workspace
   corepack pnpm --dir spikes/dsh-compat/installs/rc2 install --frozen-lockfile --ignore-workspace
-  corepack pnpm probe:dsh -- --version 0.1.0-rc.8 --mode legacy-state --out .dsh-compat-runs
-  corepack pnpm probe:dsh -- --version 0.1.0-rc.8 --mode legacy-state --out .dsh-compat-runs
-  corepack pnpm probe:dsh -- --version 0.1.1-rc.2 --mode target --out .dsh-compat-runs
-  corepack pnpm probe:dsh -- --version 0.1.1-rc.2 --mode target --out .dsh-compat-runs
+  corepack pnpm probe:dsh -- --version 0.1.0-rc.8 --mode legacy-state --run-id legacy-rc8-run-1 --out .dsh-compat-runs
+  corepack pnpm probe:dsh -- --version 0.1.0-rc.8 --mode legacy-state --run-id legacy-rc8-run-2 --out .dsh-compat-runs
+  corepack pnpm probe:dsh -- --version 0.1.1-rc.2 --mode target --run-id target-rc2-run-1 --out .dsh-compat-runs
+  corepack pnpm probe:dsh -- --version 0.1.1-rc.2 --mode target --run-id target-rc2-run-2 --out .dsh-compat-runs
   ```
 
   Both target runs must reach the same decision and isolation mode. Both legacy runs must produce identical schema/catalog identities and equivalent representative records; rc.8 hard-gate observations remain informational.
@@ -837,7 +948,7 @@
 
 - [ ] **Step 3: Write per-version reports**
 
-  Each report contains the exact package/version/integrity, run IDs, every probe status, isolation mode, artifacts and digests, supply-chain decision, observed upstream regressions, and reproduction command. Link the committed normalized evidence JSON by path and digest; do not commit large raw runtime directories or secrets.
+  For each of the six runs, normalize through Task 1, verify `specCommit`, `specSha256`, and both lockfile digests against the current files, secret-scan the result, and create its evidence JSON with `flag: 'wx'`. Each report contains the exact package/version/integrity, run IDs, every probe status, isolation mode, artifacts and digests, supply-chain decision, observed upstream regressions, and reproduction command. Link the committed normalized evidence JSON and supply-chain artifacts by path and digest; do not commit large raw runtime directories or secrets.
 
 - [ ] **Step 4: Write `decision.md` from the decision module output**
 
