@@ -85,6 +85,16 @@ export class Orchestrator {
       }
     }
     const graph = await this._deps.planner.plan(task);
+    return this.runGraph(graph, task, options);
+  }
+
+  // Level 3 Task 3: runGraph runs an already-planned graph through the same
+  // trust boundaries as runTask (routing, sandboxed invocation, candidate
+  // collection, approval, Runtime submission, fail-closed mapping).
+  // `options.skipNode` lets a caller (pipeline resume) short-circuit a node
+  // that was verified in a prior run: it must return either
+  // `{ skip: true, output, evidenceClaims, message }` or null.
+  async runGraph(graph, task, options = {}) {
     const agents = (this._deps.agents?.list?.() ?? []);
     const routing = new Map();
     const usedAgentIds = new Set();
@@ -92,6 +102,19 @@ export class Orchestrator {
     const runNode = async (node, ctx) => {
       if (task.deadline && Date.parse(task.deadline) < Date.now()) {
         throw new OrchestratorError('ORCHESTRATOR_DEADLINE_EXPIRED', `deadline passed during ${node.id}`);
+      }
+      if (typeof options.skipNode === 'function') {
+        const skipped = await options.skipNode(node, ctx);
+        if (skipped && skipped.skip === true) {
+          return {
+            success: true,
+            output: skipped.output ?? null,
+            evidenceClaims: skipped.evidenceClaims ?? [],
+            cost: skipped.cost ?? 0,
+            usage: skipped.usage ?? {},
+            message: skipped.message ?? 'reused verified stage',
+          };
+        }
       }
       const budget = budgetRemaining(task);
       if (ctx.attempt === 1 && budget.costUsd <= 0) {

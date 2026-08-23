@@ -93,7 +93,7 @@ function makeDeps(overrides = {}) {
     ],
   };
   const audit = overrides.audit ?? { events: [], toolCalled: () => {}, runtimeDecided: () => {}, agentSelected: () => {} };
-  return { repoRoot, tmp, planner, invoker, changeSandbox, runtime, agents, audit };
+  return { repoRoot, tmp, planner, invoker, changeSandbox, runtime, agents, audit, ...overrides };
 }
 
 test('Orchestrator without approval preserves the candidate patch and skips Runtime', async () => {
@@ -158,3 +158,75 @@ test('Orchestrator.runTask rejects when dependencies are missing', () => {
     (err) => err instanceof OrchestratorError && err.code === 'ORCHESTRATOR_DEPS_INVALID',
   );
 });
+
+// ----- Level 3 Task 3: runGraph extraction and skipNode resume support -----
+
+const approveAll = (cs) => ({ approved: true, actor: 'human', reason: 'go', changeSetSha256: cs.patchSha256 });
+
+test('runGraph executes a planner-produced graph without calling the planner', async () => {
+  const deps = makeDeps({
+    planner: { plan: async () => { throw new Error('planner must not be called'); } },
+  });
+  const orch = new Orchestrator(deps);
+  const report = await orch.runGraph(makeGraph(), makeTask(), { approveChangeSet: approveAll });
+  assert.equal(report.finalStatus, 'COMPLETED');
+  assert.equal(report.decision.kind, 'finish');
+});
+
+test('runGraph skipNode short-circuits a verified node without invoking the agent', async () => {
+  let invoked = 0;
+  const deps = makeDeps({
+    invoker: {
+      invoke: async (agent, node) => {
+        invoked += 1;
+        return {
+          success: true,
+          evidenceClaims: [{ kind: 'diff', payload: { ref: node.id } }],
+          output: { id: node.id },
+          cost: 0,
+          usage: {},
+          message: '',
+        };
+      },
+    },
+  });
+  const orch = new Orchestrator(deps);
+  const skipNode = async (node) => {
+    if (node.id === 'implement') {
+      return { skip: true, output: { id: node.id, reused: true }, evidenceClaims: [], message: 'verified in prior run' };
+    }
+    return null;
+  };
+  const report = await orch.runGraph(makeGraph(), makeTask(), { approveChangeSet: approveAll, skipNode });
+  assert.equal(report.finalStatus, 'COMPLETED');
+  assert.equal(invoked, 1, 'only the design node should invoke the agent');
+  assert.equal(report.nodes.implement.output.reused, true);
+  assert.equal(report.nodes.implement.status, 'SUCCEEDED');
+});
+
+test('runGraph skipNode returning null runs the node normally', async () => {
+  let invoked = 0;
+  const deps = makeDeps({
+    invoker: {
+      invoke: async (agent, node) => {
+        invoked += 1;
+        return {
+          success: true,
+          evidenceClaims: [{ kind: 'diff', payload: { ref: node.id } }],
+          output: { id: node.id },
+          cost: 0,
+          usage: {},
+          message: '',
+        };
+      },
+    },
+  });
+  const orch = new Orchestrator(deps);
+  const report = await orch.runGraph(makeGraph(), makeTask(), {
+    approveChangeSet: approveAll,
+    skipNode: async () => null,
+  });
+  assert.equal(report.finalStatus, 'COMPLETED');
+  assert.equal(invoked, 2);
+});
+
