@@ -1,0 +1,40 @@
+{
+  "queries": [
+    {
+      "id": "q-oauth",
+      "query": "oauth login redirect exchange",
+      "scope": ".",
+      "gold": ["src/auth/oauth.js", "docs/oauth-guide.md"]
+    },
+    {
+      "id": "q-token",
+      "query": "token refresh expiry storage",
+      "scope": ".",
+      "gold": ["src/auth/tokens.js"]
+    },
+    {
+      "id": "q-billing",
+      "query": "billing invoice payment ledger",
+      "scope": "src/",
+      "gold": ["src/payments/billing.js"]
+    },
+    {
+      "id": "q-architecture",
+      "query": "architecture design oauth components",
+      "scope": "docs/",
+      "gold": ["docs/architecture.md"]
+    },
+    {
+      "id": "q-scope-guard",
+      "query": "oauth provider",
+      "scope": "src/",
+      "gold": ["src/auth/oauth.js"]
+    },
+    {
+      "id": "q-provider",
+      "query": "provider configuration scopes consent",
+      "scope": ".",
+      "gold": ["docs/oauth-guide.md"]
+    }
+  ]
+}
