@@ -426,3 +426,154 @@ test('CLI task run without --approve-changes preserves candidate and returns AWA
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+// ---------- Level 3 Task 5: pipeline CLI ---------------------------------
+
+import { StateStore } from '../core/store.mjs';
+import { Orchestrator } from '../core/orchestrator.mjs';
+import { DevflowRuntimeAdapter } from '../adapters/devflow-runtime.mjs';
+import { spawnSync } from 'node:child_process';
+
+function makeGitRoot() {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'README.md'), 'init\n');
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'cli@l'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'cli'], { cwd: root });
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: root });
+  return root;
+}
+
+const STAGE_OUTPUTS = {
+  requirement: 'requirement-notes',
+  analysis: 'analysis',
+  plan: 'plan',
+  implementation: 'implementation-artifact',
+  test: 'test-report',
+  review: 'review-decision',
+};
+
+function makePipelineEnv(root) {
+  const store = StateStore.open('default', { root: path.join(root, '.workbench', 'store') });
+  const artifactsRoot = path.join(root, '.workbench', 'pipelines');
+  const invoker = { invoke: async (agent, node) => ({
+    success: true,
+    evidenceClaims: [{ kind: 'artifact', payload: { ref: node.id } }],
+    output: { artifacts: [{ name: STAGE_OUTPUTS[node.id] ?? 'out', content: `# ${node.id}\n`, kind: 'md' }] },
+    cost: 0,
+    usage: {},
+    message: 'ok',
+  }) };
+  const changeSandbox = {
+    create: async () => ({ repoRoot: root, sandboxPath: root, runId: 'r', baseCommit: 'h', async cleanup() {} }),
+    collect: async () => ({ runId: 'r', baseCommit: 'h', patchSha256: 'a'.repeat(64), changedFiles: ['README.md'], edits: [{ path: 'README.md', content: 'init\n', expectedDigest: '', changeType: 'replace' }], sandboxPath: root }),
+  };
+  const runtime = new DevflowRuntimeAdapter({
+    runner: async () => ({ stdout: JSON.stringify({
+      session: { id: 's', intent_version: '1.0.0', policy_version: '1.0.0', state_revision: 1, status: 'active' },
+      state_revision: 1, status: 'applied', blocking_reasons: [], evidence_ids: ['e'],
+      decision: { kind: 'finish', reason: 'ok' }, event_store_integrity: { valid: true, last_sequence: 5, error: null },
+    }), stderr: '', exitCode: 0 }),
+    tempRoot: root,
+  });
+  const orchestrator = new Orchestrator({
+    repoRoot: root,
+    planner: { plan: async () => { throw new Error('pipeline CLI must not plan'); } },
+    invoker,
+    changeSandbox,
+    runtime,
+    agents: { list: () => [{ id: 'fixture', capabilities: ['requirement', 'analysis', 'planning', 'implementation', 'testing', 'reviewer'], tools: [], maxRisk: 'high', maxContextTokens: 32000 }] },
+    audit: { agentSelected: () => {} },
+  });
+  return { store, artifactsRoot, orchestrator };
+}
+
+test('CLI pipeline list prints the standard template', async () => {
+  const out = [];
+  const code = await run(['pipeline', 'list'], { write: (c) => out.push(c) }, { write: () => {} }, tmpRoot());
+  assert.equal(code, 0);
+  assert.match(out.join(''), /standard-development/);
+  assert.match(out.join(''), /requirement → analysis → plan → implementation → test → review/);
+});
+
+test('CLI pipeline simulate compiles a template without executing', async () => {
+  const out = [];
+  const code = await run(['pipeline', 'simulate', '--template', 'standard-development', '--goal', 'Add OAuth'], { write: (c) => out.push(c) }, { write: () => {} }, tmpRoot());
+  assert.equal(code, 0);
+  const text = out.join('');
+  assert.match(text, /simulated, no execution/);
+  assert.match(text, /implementation \[work\] deps=plan acceptance=scope/);
+  assert.match(text, /review \[review\] deps=test acceptance=audit/);
+});
+
+test('CLI pipeline simulate rejects unknown templates', async () => {
+  const err = [];
+  const code = await run(['pipeline', 'simulate', '--template', 'nope', '--goal', 'x'], { write: () => {} }, { write: (c) => err.push(c) }, tmpRoot());
+  assert.equal(code, 2);
+  assert.match(err.join(''), /unknown pipeline template/);
+});
+
+test('CLI pipeline run with approval maps Runtime finish to exit 0 and COMPLETED', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const out = [];
+    const code = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth', '--approve-changes'],
+      { write: (c) => out.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.equal(code, 0);
+    const text = out.join('');
+    assert.match(text, /finalStatus: COMPLETED/);
+    assert.match(text, /executionStatus: EXECUTION_SUCCEEDED/);
+    assert.match(text, /stages: requirement=SUCCEEDED analysis=SUCCEEDED plan=SUCCEEDED implementation=SUCCEEDED test=SUCCEEDED review=SUCCEEDED/);
+    assert.match(text, /artifacts: 6/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI pipeline run without approval stops at AWAITING_APPROVAL', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const out = [];
+    const code = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth'],
+      { write: (c) => out.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.notEqual(code, 0);
+    assert.match(out.join(''), /finalStatus: AWAITING_APPROVAL/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI pipeline status shows recorded stage states', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const runOut = [];
+    const runCode = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth', '--approve-changes'],
+      { write: (c) => runOut.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.equal(runCode, 0);
+    const runId = /runId: ([^\s]+)/.exec(runOut.join(''))[1];
+    const out = [];
+    const code = await run(['pipeline', 'status', '--pipeline-id', 'standard-development', '--run-id', runId], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /review: SUCCEEDED artifacts=1/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

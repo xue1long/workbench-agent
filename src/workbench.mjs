@@ -200,6 +200,10 @@ Usage:
   workbench agent list [--manifest PATH]      List declared agents.
   workbench mcp list [--manifest PATH]        List declared MCP servers.
   workbench package list [--manifest PATH]    List declared packages.
+  workbench pipeline list                     List pipeline templates.
+  workbench pipeline simulate --template <id> --goal <text>  Compile a template (no execution).
+  workbench pipeline status --pipeline-id <id> --run-id <id>  Show stage states for a run.
+  workbench pipeline run --template <id> --goal <text> [--resume-run <id>] [--approve-changes]  Run a pipeline.
   workbench --help                            Show this help.
 
 Default manifest lookup: workspace.json, then workspace.yaml in cwd.
@@ -551,6 +555,148 @@ async function runTaskSimulate(rest, stdout, stderr, cwd) {
   }
 }
 
+async function runPipelineList(rest, stdout, stderr) {
+  try {
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    for (const t of pipelineTemplates.list()) {
+      stdout.write(`pipeline: ${t.id} v${t.version}\n  stages: ${t.stageIds.join(' → ')}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline list failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineSimulate(rest, stdout, stderr) {
+  const tIdx = rest.indexOf('--template');
+  const gIdx = rest.indexOf('--goal');
+  if (tIdx < 0 || gIdx < 0) {
+    stderr.write('workbench pipeline simulate requires --template <id> --goal <text>\n');
+    return 2;
+  }
+  try {
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    const { compilePipeline } = await import('../core/pipeline.mjs');
+    const template = pipelineTemplates.get(rest[tIdx + 1]);
+    if (!template) {
+      stderr.write(`unknown pipeline template ${rest[tIdx + 1]}\n`);
+      return 2;
+    }
+    const graph = compilePipeline(template, { id: 'sim', goal: rest[gIdx + 1] });
+    stdout.write(`pipeline: ${template.id} v${template.version} (simulated, no execution)\n`);
+    for (const node of graph.nodes) {
+      stdout.write(`  ${node.id} [${node.kind}] deps=${node.dependencies.join(',') || '-'} acceptance=${node.acceptanceCriteria.map((a) => a.verifierRef).join(',')}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline simulation failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineStatus(rest, stdout, stderr, cwd) {
+  const pIdx = rest.indexOf('--pipeline-id');
+  const rIdx = rest.indexOf('--run-id');
+  if (pIdx < 0 || rIdx < 0) {
+    stderr.write('workbench pipeline status requires --pipeline-id <id> --run-id <id>\n');
+    return 2;
+  }
+  try {
+    const { StateStore } = await import('../core/store.mjs');
+    const { pipelineRunStatus } = await import('../core/pipeline-runner.mjs');
+    const store = StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    const status = pipelineRunStatus(store, rest[pIdx + 1], rest[rIdx + 1]);
+    if (Object.keys(status.stages).length === 0) {
+      stderr.write(`no stage records for pipeline ${status.pipelineId} run ${status.runId}\n`);
+      return 1;
+    }
+    for (const [stageId, stage] of Object.entries(status.stages)) {
+      stdout.write(`${stageId}: ${stage.status} artifacts=${Object.keys(stage.artifactHashes).length}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline status failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineRun(rest, stdout, stderr, cwd, injected = null) {
+  const tIdx = rest.indexOf('--template');
+  const gIdx = rest.indexOf('--goal');
+  if (tIdx < 0 || gIdx < 0) {
+    stderr.write('workbench pipeline run requires --template <id> --goal <text>\n');
+    return 2;
+  }
+  const templateId = rest[tIdx + 1];
+  const goal = rest[gIdx + 1];
+  const approve = rest.includes('--approve-changes');
+  const resumeIdx = rest.indexOf('--resume-run');
+  const resumeRunId = resumeIdx >= 0 ? rest[resumeIdx + 1] : null;
+  if (!fs.existsSync(path.join(cwd, '.git'))) {
+    stderr.write('workbench pipeline run requires a Git working copy\n');
+    return 2;
+  }
+  try {
+    const { createTask } = await import('../core/task-graph.mjs');
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    const { Orchestrator } = await import('../core/orchestrator.mjs');
+    const { StateStore } = await import('../core/store.mjs');
+    const { createPipelineRunner } = await import('../core/pipeline-runner.mjs');
+    const template = pipelineTemplates.get(templateId);
+    if (!template) {
+      stderr.write(`unknown pipeline template ${templateId}\n`);
+      return 2;
+    }
+    const task = createTask({ id: `pipeline-${Date.now()}`, goal });
+    const store = injected?.store ?? StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    let orchestrator;
+    if (injected?.orchestrator) {
+      orchestrator = injected.orchestrator;
+    } else {
+      const { DevflowRuntimeAdapter } = await import('../adapters/devflow-runtime.mjs');
+      const { ProcessAgentInvoker } = await import('../adapters/process-agent.mjs');
+      const { AgentRegistry } = await import('../core/agents.mjs');
+      const { createChangeSandbox, collectChangeSet } = await import('../core/change-sandbox.mjs');
+      const { createTaskGraph } = await import('../core/task-graph.mjs');
+      const placeholder = createTaskGraph({
+        task,
+        nodes: [{ id: 'p', goal: 'placeholder', acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] }],
+      });
+      const deps = await buildLiveTaskDeps({
+        cwd, goal, graph: placeholder, registry: new AgentRegistry(), approve, stderr,
+        DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet,
+      });
+      orchestrator = new Orchestrator(deps);
+    }
+    const runner = createPipelineRunner({
+      orchestrator,
+      store,
+      artifactsRoot: injected?.artifactsRoot ?? path.join(cwd, '.workbench', 'pipelines'),
+    });
+    const report = await runner.run({
+      template,
+      task,
+      resumeRunId,
+      approveChangeSet: approve
+        ? (cs) => ({ approved: true, actor: 'cli', reason: 'go', changeSetSha256: cs.patchSha256 })
+        : () => ({ approved: false }),
+    });
+    stdout.write(`pipeline: ${report.pipelineId} v${report.templateVersion} runId: ${report.runId}\n`);
+    if (report.resumedFrom) stdout.write(`resumedFrom: ${report.resumedFrom}\n`);
+    stdout.write(`executionStatus: ${report.executionStatus}\nfinalStatus: ${report.finalStatus}\ndecision: ${report.decision?.kind ?? 'none'}\n`);
+    stdout.write(`stages: ${Object.entries(report.stages).map(([id, s]) => `${id}=${s.status}`).join(' ')}\n`);
+    if (report.artifacts.length) stdout.write(`artifacts: ${report.artifacts.length}\n`);
+    if (report.changedFiles.length) stdout.write(`changedFiles: ${report.changedFiles.join(',')}\n`);
+    if (report.finalStatus === 'COMPLETED') return 0;
+    if (report.finalStatus === 'QUARANTINED') return 3;
+    return 1;
+  } catch (err) {
+    stderr.write(`pipeline run failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
 async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
   const goalIdx = rest.indexOf('--goal');
   if (goalIdx < 0) {
@@ -576,8 +722,7 @@ async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
       { id: 'plan', goal: 'plan the task', acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] },
       { id: 'implement', goal: 'implement', dependencies: ['plan'], acceptanceCriteria: [{ id: 'im', verifierRef: 'diff', required: true }] },
     ],
-  });
-  const registry = new AgentRegistry();
+  });  const registry = new AgentRegistry();
   const deps = injected ?? await buildLiveTaskDeps({ cwd, goal, graph, registry, approve, stderr, DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet });
   const orch = new Orchestrator(deps);
   try {
@@ -709,6 +854,10 @@ export async function run(argv = process.argv.slice(2), stdout = process.stdout,
     if (command === 'task' && subcommand === 'simulate') return await runTaskSimulate(rest, stdout, stderr, cwd);
     if (command === 'task' && subcommand === 'run') return await runTaskRun(rest, stdout, stderr, cwd, options?.deps);
     if (command === 'task' && subcommand === 'help') return printTaskHelp(stdout) || 0;
+    if (command === 'pipeline' && subcommand === 'list') return await runPipelineList(rest, stdout, stderr);
+    if (command === 'pipeline' && subcommand === 'simulate') return await runPipelineSimulate(rest, stdout, stderr);
+    if (command === 'pipeline' && subcommand === 'status') return await runPipelineStatus(rest, stdout, stderr, cwd);
+    if (command === 'pipeline' && subcommand === 'run') return await runPipelineRun(rest, stdout, stderr, cwd, options?.pipeline);
     if (command === 'agent' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'agent');
     if (command === 'mcp' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'mcp');
     if (command === 'package' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'package');

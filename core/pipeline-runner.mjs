@@ -271,18 +271,22 @@ export class PipelineRunner {
   }
 
   async status({ pipelineId, runId }) {
-    const rows = this._store.readRows(STAGE_TABLE).filter((r) => r.pipelineId === pipelineId && r.runId === runId);
-    const stages = {};
-    for (const row of rows) {
-      stages[row.stageId] = {
-        status: row.status,
-        definitionHash: row.definitionHash,
-        artifactHashes: row.artifactHashes ?? {},
-        evidenceClaims: row.evidenceClaims ?? [],
-      };
-    }
-    return { pipelineId, runId, stages };
+    return pipelineRunStatus(this._store, pipelineId, runId);
   }
+}
+
+export function pipelineRunStatus(store, pipelineId, runId) {
+  const rows = store.readRows(STAGE_TABLE).filter((r) => r.pipelineId === pipelineId && r.runId === runId);
+  const stages = {};
+  for (const row of rows) {
+    stages[row.stageId] = {
+      status: row.status,
+      definitionHash: row.definitionHash,
+      artifactHashes: row.artifactHashes ?? {},
+      evidenceClaims: row.evidenceClaims ?? [],
+    };
+  }
+  return { pipelineId, runId, stages };
 }
 
 export function createPipelineRunner(deps) {
