@@ -162,3 +162,14 @@ export function assertFailureClass(value) {
     throw new TrajectoryError('TRAJECTORY_FAILURE_CLASS_INVALID', `unknown failure class ${JSON.stringify(value)}`, { accepted: [...FAILURE_CLASSES] });
   }
 }
+
+// Append a normalized trajectory row to the store table `trajectory` (the
+// dashboard's /api/evaluation projection source).
+export function persistTrajectory(store, run) {
+  if (!store || typeof store.appendRow !== 'function') {
+    throw new TrajectoryError('TRAJECTORY_STORE_INVALID', 'persistTrajectory requires a StateStore');
+  }
+  const row = recordRun({ run });
+  store.appendRow('trajectory', row);
+  return row;
+}
