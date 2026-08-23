@@ -426,3 +426,217 @@ test('CLI task run without --approve-changes preserves candidate and returns AWA
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+// ---------- Level 3 Task 5: pipeline CLI ---------------------------------
+
+import { StateStore } from '../core/store.mjs';
+import { Orchestrator } from '../core/orchestrator.mjs';
+import { DevflowRuntimeAdapter } from '../adapters/devflow-runtime.mjs';
+import { spawnSync } from 'node:child_process';
+
+function makeGitRoot() {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'README.md'), 'init\n');
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'cli@l'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'cli'], { cwd: root });
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: root });
+  return root;
+}
+
+const STAGE_OUTPUTS = {
+  requirement: 'requirement-notes',
+  analysis: 'analysis',
+  plan: 'plan',
+  implementation: 'implementation-artifact',
+  test: 'test-report',
+  review: 'review-decision',
+};
+
+function makePipelineEnv(root) {
+  const store = StateStore.open('default', { root: path.join(root, '.workbench', 'store') });
+  const artifactsRoot = path.join(root, '.workbench', 'pipelines');
+  const invoker = { invoke: async (agent, node) => ({
+    success: true,
+    evidenceClaims: [{ kind: 'artifact', payload: { ref: node.id } }],
+    output: { artifacts: [{ name: STAGE_OUTPUTS[node.id] ?? 'out', content: `# ${node.id}\n`, kind: 'md' }] },
+    cost: 0,
+    usage: {},
+    message: 'ok',
+  }) };
+  const changeSandbox = {
+    create: async () => ({ repoRoot: root, sandboxPath: root, runId: 'r', baseCommit: 'h', async cleanup() {} }),
+    collect: async () => ({ runId: 'r', baseCommit: 'h', patchSha256: 'a'.repeat(64), changedFiles: ['README.md'], edits: [{ path: 'README.md', content: 'init\n', expectedDigest: '', changeType: 'replace' }], sandboxPath: root }),
+  };
+  const runtime = new DevflowRuntimeAdapter({
+    runner: async () => ({ stdout: JSON.stringify({
+      session: { id: 's', intent_version: '1.0.0', policy_version: '1.0.0', state_revision: 1, status: 'active' },
+      state_revision: 1, status: 'applied', blocking_reasons: [], evidence_ids: ['e'],
+      decision: { kind: 'finish', reason: 'ok' }, event_store_integrity: { valid: true, last_sequence: 5, error: null },
+    }), stderr: '', exitCode: 0 }),
+    tempRoot: root,
+  });
+  const orchestrator = new Orchestrator({
+    repoRoot: root,
+    planner: { plan: async () => { throw new Error('pipeline CLI must not plan'); } },
+    invoker,
+    changeSandbox,
+    runtime,
+    agents: { list: () => [{ id: 'fixture', capabilities: ['requirement', 'analysis', 'planning', 'implementation', 'testing', 'reviewer'], tools: [], maxRisk: 'high', maxContextTokens: 32000 }] },
+    audit: { agentSelected: () => {} },
+  });
+  return { store, artifactsRoot, orchestrator };
+}
+
+test('CLI pipeline list prints the standard template', async () => {
+  const out = [];
+  const code = await run(['pipeline', 'list'], { write: (c) => out.push(c) }, { write: () => {} }, tmpRoot());
+  assert.equal(code, 0);
+  assert.match(out.join(''), /standard-development/);
+  assert.match(out.join(''), /requirement → analysis → plan → implementation → test → review/);
+});
+
+test('CLI pipeline simulate compiles a template without executing', async () => {
+  const out = [];
+  const code = await run(['pipeline', 'simulate', '--template', 'standard-development', '--goal', 'Add OAuth'], { write: (c) => out.push(c) }, { write: () => {} }, tmpRoot());
+  assert.equal(code, 0);
+  const text = out.join('');
+  assert.match(text, /simulated, no execution/);
+  assert.match(text, /implementation \[work\] deps=plan acceptance=scope/);
+  assert.match(text, /review \[review\] deps=test acceptance=audit/);
+});
+
+test('CLI pipeline simulate rejects unknown templates', async () => {
+  const err = [];
+  const code = await run(['pipeline', 'simulate', '--template', 'nope', '--goal', 'x'], { write: () => {} }, { write: (c) => err.push(c) }, tmpRoot());
+  assert.equal(code, 2);
+  assert.match(err.join(''), /unknown pipeline template/);
+});
+
+test('CLI pipeline run with approval maps Runtime finish to exit 0 and COMPLETED', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const out = [];
+    const code = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth', '--approve-changes'],
+      { write: (c) => out.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.equal(code, 0);
+    const text = out.join('');
+    assert.match(text, /finalStatus: COMPLETED/);
+    assert.match(text, /executionStatus: EXECUTION_SUCCEEDED/);
+    assert.match(text, /stages: requirement=SUCCEEDED analysis=SUCCEEDED plan=SUCCEEDED implementation=SUCCEEDED test=SUCCEEDED review=SUCCEEDED/);
+    assert.match(text, /artifacts: 6/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI pipeline run without approval stops at AWAITING_APPROVAL', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const out = [];
+    const code = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth'],
+      { write: (c) => out.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.notEqual(code, 0);
+    assert.match(out.join(''), /finalStatus: AWAITING_APPROVAL/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI pipeline status shows recorded stage states', async () => {
+  const root = makeGitRoot();
+  try {
+    const env = makePipelineEnv(root);
+    const runOut = [];
+    const runCode = await run(
+      ['pipeline', 'run', '--template', 'standard-development', '--goal', 'Add OAuth', '--approve-changes'],
+      { write: (c) => runOut.push(c) },
+      { write: () => {} },
+      root,
+      { pipeline: env },
+    );
+    assert.equal(runCode, 0);
+    const runId = /runId: ([^\s]+)/.exec(runOut.join(''))[1];
+    const out = [];
+    const code = await run(['pipeline', 'status', '--pipeline-id', 'standard-development', '--run-id', runId], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /review: SUCCEEDED artifacts=1/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------- Level 3 Task 10: knowledge + memory CLI ------------------------
+
+import { createKnowledgeStore } from '../core/knowledge-store.mjs';
+import { createProjectMemory } from '../core/project-memory.mjs';
+
+test('CLI knowledge ingest + retrieve round trip with citations', async () => {
+  const root = tmpRoot();
+  try {
+    const docs = path.join(root, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'oauth.md'), '# OAuth login\nredirect token exchange provider scopes\n', 'utf8');
+    fs.writeFileSync(path.join(docs, 'other.md'), 'unrelated text about gardening\n', 'utf8');
+    const ingestOut = [];
+    const ingestCode = await run(['knowledge', 'ingest', '--dir', docs, '--scope', 'repo/'], { write: (c) => ingestOut.push(c) }, { write: () => {} }, root);
+    assert.equal(ingestCode, 0);
+    assert.match(ingestOut.join(''), /ingested: 2/);
+    const retrOut = [];
+    const retrCode = await run(['knowledge', 'retrieve', '--query', 'oauth', '--scope', 'repo/'], { write: (c) => retrOut.push(c) }, { write: () => {} }, root);
+    assert.equal(retrCode, 0);
+    const text = retrOut.join('');
+    assert.match(text, /items: 1/);
+    assert.match(text, /repo\/oauth\.md/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI knowledge benchmark reports precision and coverage', async () => {
+  const root = tmpRoot();
+  try {
+    const docs = path.resolve('fixtures/knowledge/benchmark/documents');
+    const queries = path.resolve('fixtures/knowledge/benchmark/queries.json');
+    const out = [];
+    const code = await run(['knowledge', 'benchmark', '--fixture', docs, '--queries', queries], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    const text = out.join('');
+    assert.match(text, /precisionAt5: 0\.\d+/);
+    assert.match(text, /sourceCoverage: (0\.\d+|1)/);
+    assert.match(text, /q-oauth/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI memory list shows seeded reviewed decisions only', async () => {
+  const root = tmpRoot();
+  try {
+    const store = StateStore.open('default', { root: path.join(root, '.workbench', 'store') });
+    const mem = createProjectMemory({ store, objectsRoot: path.join(root, '.workbench', 'memory', 'objects') });
+    mem.saveDecision({
+      runId: 'r1',
+      decision: { kind: 'decision', reviewed: true, reviewerEvidenceRef: 'ev1', scope: 'src/', source: 'strategy', content: 'use deterministic routing' },
+    });
+    const out = [];
+    const code = await run(['memory', 'list', '--scope', 'src/'], { write: (c) => out.push(c) }, { write: () => {} }, root);
+    assert.equal(code, 0);
+    assert.match(out.join(''), /decision:strategy/);
+    assert.match(out.join(''), /verifier=-/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

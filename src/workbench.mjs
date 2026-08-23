@@ -200,6 +200,14 @@ Usage:
   workbench agent list [--manifest PATH]      List declared agents.
   workbench mcp list [--manifest PATH]        List declared MCP servers.
   workbench package list [--manifest PATH]    List declared packages.
+  workbench pipeline list                     List pipeline templates.
+  workbench pipeline simulate --template <id> --goal <text>  Compile a template (no execution).
+  workbench pipeline status --pipeline-id <id> --run-id <id>  Show stage states for a run.
+  workbench pipeline run --template <id> --goal <text> [--resume-run <id>] [--approve-changes]  Run a pipeline.
+  workbench knowledge ingest --dir <path> --scope <scope> [--kind markdown|code]  Ingest repo files.
+  workbench knowledge retrieve --query <text> --scope <scope> [--budget N]  Scoped retrieval.
+  workbench knowledge benchmark [--fixture <dir>] [--queries <json>]  Fixed retrieval benchmark.
+  workbench memory list [--scope <scope>]     List durable project memory entries.
   workbench --help                            Show this help.
 
 Default manifest lookup: workspace.json, then workspace.yaml in cwd.
@@ -551,6 +559,262 @@ async function runTaskSimulate(rest, stdout, stderr, cwd) {
   }
 }
 
+async function runPipelineList(rest, stdout, stderr) {
+  try {
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    for (const t of pipelineTemplates.list()) {
+      stdout.write(`pipeline: ${t.id} v${t.version}\n  stages: ${t.stageIds.join(' → ')}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline list failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineSimulate(rest, stdout, stderr) {
+  const tIdx = rest.indexOf('--template');
+  const gIdx = rest.indexOf('--goal');
+  if (tIdx < 0 || gIdx < 0) {
+    stderr.write('workbench pipeline simulate requires --template <id> --goal <text>\n');
+    return 2;
+  }
+  try {
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    const { compilePipeline } = await import('../core/pipeline.mjs');
+    const template = pipelineTemplates.get(rest[tIdx + 1]);
+    if (!template) {
+      stderr.write(`unknown pipeline template ${rest[tIdx + 1]}\n`);
+      return 2;
+    }
+    const graph = compilePipeline(template, { id: 'sim', goal: rest[gIdx + 1] });
+    stdout.write(`pipeline: ${template.id} v${template.version} (simulated, no execution)\n`);
+    for (const node of graph.nodes) {
+      stdout.write(`  ${node.id} [${node.kind}] deps=${node.dependencies.join(',') || '-'} acceptance=${node.acceptanceCriteria.map((a) => a.verifierRef).join(',')}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline simulation failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineStatus(rest, stdout, stderr, cwd) {
+  const pIdx = rest.indexOf('--pipeline-id');
+  const rIdx = rest.indexOf('--run-id');
+  if (pIdx < 0 || rIdx < 0) {
+    stderr.write('workbench pipeline status requires --pipeline-id <id> --run-id <id>\n');
+    return 2;
+  }
+  try {
+    const { StateStore } = await import('../core/store.mjs');
+    const { pipelineRunStatus } = await import('../core/pipeline-runner.mjs');
+    const store = StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    const status = pipelineRunStatus(store, rest[pIdx + 1], rest[rIdx + 1]);
+    if (Object.keys(status.stages).length === 0) {
+      stderr.write(`no stage records for pipeline ${status.pipelineId} run ${status.runId}\n`);
+      return 1;
+    }
+    for (const [stageId, stage] of Object.entries(status.stages)) {
+      stdout.write(`${stageId}: ${stage.status} artifacts=${Object.keys(stage.artifactHashes).length}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`pipeline status failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runPipelineRun(rest, stdout, stderr, cwd, injected = null) {
+  const tIdx = rest.indexOf('--template');
+  const gIdx = rest.indexOf('--goal');
+  if (tIdx < 0 || gIdx < 0) {
+    stderr.write('workbench pipeline run requires --template <id> --goal <text>\n');
+    return 2;
+  }
+  const templateId = rest[tIdx + 1];
+  const goal = rest[gIdx + 1];
+  const approve = rest.includes('--approve-changes');
+  const resumeIdx = rest.indexOf('--resume-run');
+  const resumeRunId = resumeIdx >= 0 ? rest[resumeIdx + 1] : null;
+  if (!fs.existsSync(path.join(cwd, '.git'))) {
+    stderr.write('workbench pipeline run requires a Git working copy\n');
+    return 2;
+  }
+  try {
+    const { createTask } = await import('../core/task-graph.mjs');
+    const { pipelineTemplates } = await import('../core/pipeline-templates.mjs');
+    const { Orchestrator } = await import('../core/orchestrator.mjs');
+    const { StateStore } = await import('../core/store.mjs');
+    const { createPipelineRunner } = await import('../core/pipeline-runner.mjs');
+    const template = pipelineTemplates.get(templateId);
+    if (!template) {
+      stderr.write(`unknown pipeline template ${templateId}\n`);
+      return 2;
+    }
+    const task = createTask({ id: `pipeline-${Date.now()}`, goal });
+    const store = injected?.store ?? StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    let orchestrator;
+    if (injected?.orchestrator) {
+      orchestrator = injected.orchestrator;
+    } else {
+      const { DevflowRuntimeAdapter } = await import('../adapters/devflow-runtime.mjs');
+      const { ProcessAgentInvoker } = await import('../adapters/process-agent.mjs');
+      const { AgentRegistry } = await import('../core/agents.mjs');
+      const { createChangeSandbox, collectChangeSet } = await import('../core/change-sandbox.mjs');
+      const { createTaskGraph } = await import('../core/task-graph.mjs');
+      const placeholder = createTaskGraph({
+        task,
+        nodes: [{ id: 'p', goal: 'placeholder', acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] }],
+      });
+      const deps = await buildLiveTaskDeps({
+        cwd, goal, graph: placeholder, registry: new AgentRegistry(), approve, stderr,
+        DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet,
+      });
+      orchestrator = new Orchestrator(deps);
+    }
+    const runner = createPipelineRunner({
+      orchestrator,
+      store,
+      artifactsRoot: injected?.artifactsRoot ?? path.join(cwd, '.workbench', 'pipelines'),
+    });
+    const report = await runner.run({
+      template,
+      task,
+      resumeRunId,
+      approveChangeSet: approve
+        ? (cs) => ({ approved: true, actor: 'cli', reason: 'go', changeSetSha256: cs.patchSha256 })
+        : () => ({ approved: false }),
+    });
+    stdout.write(`pipeline: ${report.pipelineId} v${report.templateVersion} runId: ${report.runId}\n`);
+    if (report.resumedFrom) stdout.write(`resumedFrom: ${report.resumedFrom}\n`);
+    stdout.write(`executionStatus: ${report.executionStatus}\nfinalStatus: ${report.finalStatus}\ndecision: ${report.decision?.kind ?? 'none'}\n`);
+    stdout.write(`stages: ${Object.entries(report.stages).map(([id, s]) => `${id}=${s.status}`).join(' ')}\n`);
+    if (report.artifacts.length) stdout.write(`artifacts: ${report.artifacts.length}\n`);
+    if (report.changedFiles.length) stdout.write(`changedFiles: ${report.changedFiles.join(',')}\n`);
+    if (report.finalStatus === 'COMPLETED') return 0;
+    if (report.finalStatus === 'QUARANTINED') return 3;
+    return 1;
+  } catch (err) {
+    stderr.write(`pipeline run failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runKnowledgeIngest(rest, stdout, stderr, cwd) {
+  const dirIdx = rest.indexOf('--dir');
+  const scopeIdx = rest.indexOf('--scope');
+  if (dirIdx < 0 || scopeIdx < 0) {
+    stderr.write('workbench knowledge ingest requires --dir <path> --scope <scope>\n');
+    return 2;
+  }
+  try {
+    const { StateStore } = await import('../core/store.mjs');
+    const { createKnowledgeStore } = await import('../core/knowledge-store.mjs');
+    const store = StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    const k = createKnowledgeStore({ store, objectsRoot: path.join(cwd, '.workbench', 'knowledge', 'objects') });
+    const kindIdx = rest.indexOf('--kind');
+    const kinds = kindIdx >= 0 ? [rest[kindIdx + 1]] : null;
+    const out = k.ingestDirectory({ dir: rest[dirIdx + 1], scope: rest[scopeIdx + 1], kinds });
+    stdout.write(`ingested: ${out.ingested.length}, skipped: ${out.skipped.length}\n`);
+    for (const r of out.ingested.slice(0, 20)) stdout.write(`  ${r.sourcePath} (${r.kind})\n`);
+    if (out.ingested.length > 20) stdout.write(`  … ${out.ingested.length - 20} more\n`);
+    return 0;
+  } catch (err) {
+    stderr.write(`knowledge ingest failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runKnowledgeRetrieve(rest, stdout, stderr, cwd) {
+  const qIdx = rest.indexOf('--query');
+  const scopeIdx = rest.indexOf('--scope');
+  if (qIdx < 0 || scopeIdx < 0) {
+    stderr.write('workbench knowledge retrieve requires --query <text> --scope <scope>\n');
+    return 2;
+  }
+  let budget = 8000;
+  const bIdx = rest.indexOf('--budget');
+  if (bIdx >= 0) {
+    const v = Number.parseInt(rest[bIdx + 1], 10);
+    if (Number.isNaN(v) || v < 0) {
+      stderr.write('workbench knowledge retrieve --budget must be a non-negative integer\n');
+      return 2;
+    }
+    budget = v;
+  }
+  try {
+    const { StateStore } = await import('../core/store.mjs');
+    const { createKnowledgeStore } = await import('../core/knowledge-store.mjs');
+    const { retrieve } = await import('../core/knowledge-retrieval.mjs');
+    const store = StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    const k = createKnowledgeStore({ store, objectsRoot: path.join(cwd, '.workbench', 'knowledge', 'objects') });
+    const rows = k.list();
+    if (rows.length === 0) {
+      stderr.write('knowledge store is empty; run `workbench knowledge ingest` first\n');
+      return 1;
+    }
+    const index = rows.map((r) => ({ ...r, content: k.content(r) }));
+    const result = retrieve({ index, query: rest[qIdx + 1], scope: rest[scopeIdx + 1], budgetChars: budget });
+    stdout.write(`query: ${result.query}\nscope: ${result.scope}\nitems: ${result.items.length} budgetUsed: ${result.budgetUsed} scopeCapped: ${result.scopeCapped}\n`);
+    for (const item of result.items) {
+      stdout.write(`  ${item.sourcePath} (score ${item.score}, ${item.scope})\n    matched: ${item.matchedTerms.join(',')}\n`);
+    }
+    return result.items.length > 0 ? 0 : 1;
+  } catch (err) {
+    stderr.write(`knowledge retrieve failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runKnowledgeBenchmark(rest, stdout, stderr, cwd) {
+  try {
+    const pathMod = await import('node:path');
+    const { runRetrievalBenchmark, loadBenchmarkFixture } = await import('../core/retrieval-benchmark.mjs');
+    const fIdx = rest.indexOf('--fixture');
+    const qIdx = rest.indexOf('--queries');
+    const docsDir = fIdx >= 0 && rest[fIdx + 1] ? pathMod.resolve(rest[fIdx + 1]) : pathMod.resolve(cwd, 'fixtures', 'knowledge', 'benchmark', 'documents');
+    const queriesPath = qIdx >= 0 && rest[qIdx + 1] ? pathMod.resolve(rest[qIdx + 1]) : pathMod.resolve(cwd, 'fixtures', 'knowledge', 'benchmark', 'queries.json');
+    const ctx = loadBenchmarkFixture({ documentsDir: docsDir, queriesPath });
+    try {
+      const result = runRetrievalBenchmark({ index: ctx.index, benchmark: ctx.benchmark });
+      stdout.write(`precisionAt5: ${result.precisionAt5}\nsourceCoverage: ${result.sourceCoverage}\n`);
+      for (const q of result.perQuery) {
+        stdout.write(`  ${q.id}: precision@5 ${q.precisionAt5} hits=${q.hits.join(',') || '-'}\n`);
+      }
+      return 0;
+    } finally {
+      ctx.cleanup();
+    }
+  } catch (err) {
+    stderr.write(`knowledge benchmark failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
+async function runMemoryList(rest, stdout, stderr, cwd) {
+  const scopeIdx = rest.indexOf('--scope');
+  const scope = scopeIdx >= 0 ? rest[scopeIdx + 1] : null;
+  try {
+    const { StateStore } = await import('../core/store.mjs');
+    const { createProjectMemory } = await import('../core/project-memory.mjs');
+    const store = StateStore.open('default', { root: path.join(cwd, '.workbench', 'store') });
+    const mem = createProjectMemory({ store, objectsRoot: path.join(cwd, '.workbench', 'memory', 'objects') });
+    const rows = mem.query({ scope });
+    if (rows.length === 0) {
+      stdout.write('no project memory entries\n');
+      return 1;
+    }
+    for (const row of rows) {
+      stdout.write(`${row.type}:${row.source} scope=${row.scope ?? '-'} verifier=${row.verifierVersion ?? '-'} evidence=${row.evidenceKind ?? '-'}\n`);
+    }
+    return 0;
+  } catch (err) {
+    stderr.write(`memory list failed: ${err.message}\n`);
+    return 1;
+  }
+}
+
 async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
   const goalIdx = rest.indexOf('--goal');
   if (goalIdx < 0) {
@@ -576,8 +840,7 @@ async function runTaskRun(rest, stdout, stderr, cwd, injected = null) {
       { id: 'plan', goal: 'plan the task', acceptanceCriteria: [{ id: 'pa', verifierRef: 'diff', required: true }] },
       { id: 'implement', goal: 'implement', dependencies: ['plan'], acceptanceCriteria: [{ id: 'im', verifierRef: 'diff', required: true }] },
     ],
-  });
-  const registry = new AgentRegistry();
+  });  const registry = new AgentRegistry();
   const deps = injected ?? await buildLiveTaskDeps({ cwd, goal, graph, registry, approve, stderr, DevflowRuntimeAdapter, ProcessAgentInvoker, createChangeSandbox, collectChangeSet });
   const orch = new Orchestrator(deps);
   try {
@@ -709,6 +972,14 @@ export async function run(argv = process.argv.slice(2), stdout = process.stdout,
     if (command === 'task' && subcommand === 'simulate') return await runTaskSimulate(rest, stdout, stderr, cwd);
     if (command === 'task' && subcommand === 'run') return await runTaskRun(rest, stdout, stderr, cwd, options?.deps);
     if (command === 'task' && subcommand === 'help') return printTaskHelp(stdout) || 0;
+    if (command === 'pipeline' && subcommand === 'list') return await runPipelineList(rest, stdout, stderr);
+    if (command === 'pipeline' && subcommand === 'simulate') return await runPipelineSimulate(rest, stdout, stderr);
+    if (command === 'pipeline' && subcommand === 'status') return await runPipelineStatus(rest, stdout, stderr, cwd);
+    if (command === 'pipeline' && subcommand === 'run') return await runPipelineRun(rest, stdout, stderr, cwd, options?.pipeline);
+    if (command === 'knowledge' && subcommand === 'ingest') return await runKnowledgeIngest(rest, stdout, stderr, cwd);
+    if (command === 'knowledge' && subcommand === 'retrieve') return await runKnowledgeRetrieve(rest, stdout, stderr, cwd);
+    if (command === 'knowledge' && subcommand === 'benchmark') return await runKnowledgeBenchmark(rest, stdout, stderr, cwd);
+    if (command === 'memory' && subcommand === 'list') return await runMemoryList(rest, stdout, stderr, cwd);
     if (command === 'agent' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'agent');
     if (command === 'mcp' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'mcp');
     if (command === 'package' && subcommand === 'list') return await runList(rest, stdout, stderr, cwd, 'package');

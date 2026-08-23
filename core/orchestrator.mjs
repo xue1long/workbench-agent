@@ -67,6 +67,17 @@ export class Orchestrator {
     this._collectChangeSet = dependencies.changeSandbox.collect ?? _collectChangeSet;
   }
 
+  // Level 3 Task 4: optional per-node result transform (used by the pipeline
+  // runner to persist declared artifacts and rewrite the node output to
+  // artifact references before the workflow executor records it). Passed via
+  // `options.transformResult(node, result)` like `options.skipNode`.
+  _finalize(node, result, options) {
+    if (typeof options?.transformResult === 'function') {
+      return options.transformResult(node, result);
+    }
+    return result;
+  }
+
   async planTask(task) {
     if (!task || typeof task !== 'object') {
       throw new OrchestratorError('ORCHESTRATOR_TASK_INVALID', 'task is required');
@@ -85,6 +96,16 @@ export class Orchestrator {
       }
     }
     const graph = await this._deps.planner.plan(task);
+    return this.runGraph(graph, task, options);
+  }
+
+  // Level 3 Task 3: runGraph runs an already-planned graph through the same
+  // trust boundaries as runTask (routing, sandboxed invocation, candidate
+  // collection, approval, Runtime submission, fail-closed mapping).
+  // `options.skipNode` lets a caller (pipeline resume) short-circuit a node
+  // that was verified in a prior run: it must return either
+  // `{ skip: true, output, evidenceClaims, message }` or null.
+  async runGraph(graph, task, options = {}) {
     const agents = (this._deps.agents?.list?.() ?? []);
     const routing = new Map();
     const usedAgentIds = new Set();
@@ -92,6 +113,19 @@ export class Orchestrator {
     const runNode = async (node, ctx) => {
       if (task.deadline && Date.parse(task.deadline) < Date.now()) {
         throw new OrchestratorError('ORCHESTRATOR_DEADLINE_EXPIRED', `deadline passed during ${node.id}`);
+      }
+      if (typeof options.skipNode === 'function') {
+        const skipped = await options.skipNode(node, ctx);
+        if (skipped && skipped.skip === true) {
+          return this._finalize(node, {  
+            success: true,
+            output: skipped.output ?? null,
+            evidenceClaims: skipped.evidenceClaims ?? [],
+            cost: skipped.cost ?? 0,
+            usage: skipped.usage ?? {},
+            message: skipped.message ?? 'reused verified stage',
+          });
+        }
       }
       const budget = budgetRemaining(task);
       if (ctx.attempt === 1 && budget.costUsd <= 0) {
@@ -119,11 +153,28 @@ export class Orchestrator {
       // agent actually wrote to (not a fresh empty sandbox).
       nodeSandboxes.set(node.id, sandbox);
       ctx.sandboxPath = sandbox.sandboxPath;
-      const result = await this._deps.invoker.invoke(selected.agent, node, { sandboxPath: sandbox.sandboxPath, prompt: node.goal });
+      const extraContext = typeof options.nodeContext === 'function'
+        ? (await options.nodeContext(node, ctx)) ?? {}
+        : {};
+      const result = await this._deps.invoker.invoke(selected.agent, node, { sandboxPath: sandbox.sandboxPath, prompt: node.goal, ...extraContext });
       result.agentId = selected.agent.id;
-      return result;
+      return this._finalize(node, result, options);
     };
     const executionReport = await executeWorkflow(graph, runNode, options);
+    // Fail-closed gate: a workflow that did not fully succeed must never
+    // submit a Runtime Action nor report completion. Preserve the execution
+    // report so callers can resume from the last verified stage.
+    if (executionReport.executionStatus !== 'EXECUTION_SUCCEEDED') {
+      return {
+        ...executionReport,
+        sessionId: null,
+        actionStatus: 'stage_failed',
+        trustedEvidenceIds: [],
+        decision: { kind: 'halt', reason: 'workflow did not fully succeed; no Runtime action submitted' },
+        eventStoreIntegrity: { valid: false, last_sequence: 0, error: 'no Runtime call' },
+        finalStatus: 'FAILED',
+      };
+    }
     const candidates = [];
     for (const [nodeId, state] of Object.entries(executionReport.nodes)) {
       if (state.status === 'SUCCEEDED') {
@@ -131,7 +182,11 @@ export class Orchestrator {
           ?? await this._createSandbox({ repoRoot: this._deps.repoRoot, runId: `${executionReport.runId}-${nodeId}` });
         try {
           const changeSet = await this._collectChangeSet(sandbox, { baseCommit: sandbox.baseCommit });
-          candidates.push({ nodeId, changeSet });
+          // A node whose work produced no file changes has nothing to govern;
+          // it contributes no candidate (doc stages write artifacts instead).
+          if (Array.isArray(changeSet.edits) && changeSet.edits.length > 0) {
+            candidates.push({ nodeId, changeSet });
+          }
         } finally {
           await sandbox.cleanup();
           nodeSandboxes.delete(nodeId);
