@@ -1,0 +1,11 @@
+{
+  "task": { "id": "oauth-login", "goal": "implement an offline OAuth login flow with state validation and a success UI" },
+  "nodes": [
+    { "id": "analysis", "goal": "analyse the workspace", "acceptanceCriteria": [{ "id": "a-analysis", "verifierRef": "architecture", "required": true }] },
+    { "id": "architecture", "goal": "design the OAuth flow", "dependencies": ["analysis"], "acceptanceCriteria": [{ "id": "a-arch", "verifierRef": "architecture", "required": true }] },
+    { "id": "backend", "goal": "implement the backend OAuth callback", "dependencies": ["architecture"], "acceptanceCriteria": [{ "id": "a-backend", "verifierRef": "diff", "required": true }] },
+    { "id": "frontend", "goal": "render the login UI", "dependencies": ["architecture"], "acceptanceCriteria": [{ "id": "a-frontend", "verifierRef": "diff", "required": true }] },
+    { "id": "test", "goal": "add OAuth state validation tests", "dependencies": ["backend", "frontend"], "acceptanceCriteria": [{ "id": "a-test", "verifierRef": "test", "required": true }] },
+    { "id": "review", "goal": "review the change", "dependencies": ["test"], "acceptanceCriteria": [{ "id": "a-review", "verifierRef": "audit", "required": true }], "kind": "review" }
+  ]
+}

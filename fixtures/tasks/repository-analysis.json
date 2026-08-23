@@ -1,0 +1,7 @@
+{
+  "task": { "id": "repository-analysis", "goal": "produce a structured repository analysis" },
+  "nodes": [
+    { "id": "scan", "goal": "scan the repo structure", "acceptanceCriteria": [{ "id": "a-scan", "verifierRef": "diff", "required": true }] },
+    { "id": "summarize", "goal": "summarize the findings", "dependencies": ["scan"], "acceptanceCriteria": [{ "id": "a-summary", "verifierRef": "architecture", "required": true }] }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "task": { "id": "oauth-login-failure", "goal": "expected-failure fixture: budget is exhausted before any node can run" },
+  "nodes": [
+    { "id": "design", "goal": "design the OAuth flow", "acceptanceCriteria": [{ "id": "a-arch", "verifierRef": "architecture", "required": true }] }
+  ]
+}
