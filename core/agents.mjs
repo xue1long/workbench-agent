@@ -23,6 +23,7 @@ export class AgentError extends Error {
 }
 
 const VALID_ID = /^[A-Za-z0-9._-]+$/;
+const VALID_RISK = new Set(['low', 'medium', 'high']);
 
 export function validateAgentDefinition(def) {
   if (!def || typeof def !== 'object' || Array.isArray(def)) {
@@ -40,12 +41,38 @@ export function validateAgentDefinition(def) {
   if (def.capabilities != null && !Array.isArray(def.capabilities)) {
     throw new AgentError('agent.capabilities must be an array of strings', { code: 'AGENT_FIELD_INVALID', agentId: def.id });
   }
+  if (def.tools != null && (!Array.isArray(def.tools) || def.tools.some((t) => typeof t !== 'string'))) {
+    throw new AgentError('agent.tools must be an array of strings', { code: 'AGENT_FIELD_INVALID', agentId: def.id });
+  }
+  if (def.maxRisk != null && !VALID_RISK.has(def.maxRisk)) {
+    throw new AgentError('agent.maxRisk must be low | medium | high', { code: 'AGENT_FIELD_INVALID', agentId: def.id });
+  }
+  if (def.maxContextTokens != null && (typeof def.maxContextTokens !== 'number' || def.maxContextTokens < 1)) {
+    throw new AgentError('agent.maxContextTokens must be a positive number', { code: 'AGENT_FIELD_INVALID', agentId: def.id });
+  }
+  if (def.invocation != null && (typeof def.invocation !== 'object' || Array.isArray(def.invocation))) {
+    throw new AgentError('agent.invocation must be an object', { code: 'AGENT_FIELD_INVALID', agentId: def.id });
+  }
   return def;
 }
 
 export class AgentDefinition {
-  constructor({ id, name = null, provider = null, version = null, executable = null, configPaths = [], capabilities = [], status = 'UNKNOWN' } = {}) {
-    validateAgentDefinition({ id, name, provider, executable, capabilities });
+  constructor({
+    id,
+    name = null,
+    provider = null,
+    version = null,
+    executable = null,
+    configPaths = [],
+    capabilities = [],
+    status = 'UNKNOWN',
+    tools = [],
+    maxRisk = 'medium',
+    maxContextTokens = 32000,
+    invocation = null,
+    costPerTaskUsd = null,
+  } = {}) {
+    validateAgentDefinition({ id, name, provider, executable, capabilities, tools, maxRisk, maxContextTokens, invocation });
     this.id = id;
     this.name = name ?? id;
     this.provider = provider;
@@ -53,6 +80,11 @@ export class AgentDefinition {
     this.executable = executable;
     this.configPaths = Array.isArray(configPaths) ? [...configPaths] : [];
     this.capabilities = Array.isArray(capabilities) ? [...capabilities] : [];
+    this.tools = Array.isArray(tools) ? [...tools] : [];
+    this.maxRisk = VALID_RISK.has(maxRisk) ? maxRisk : 'medium';
+    this.maxContextTokens = typeof maxContextTokens === 'number' && maxContextTokens > 0 ? maxContextTokens : 32000;
+    this.invocation = invocation && typeof invocation === 'object' ? { ...invocation } : null;
+    this.costPerTaskUsd = typeof costPerTaskUsd === 'number' ? costPerTaskUsd : null;
     this.status = status; // UNKNOWN | MISSING | INSTALLED | OUTDATED | ERROR | DISABLED
   }
   toJSON() {
@@ -64,6 +96,11 @@ export class AgentDefinition {
       executable: this.executable,
       configPaths: [...this.configPaths],
       capabilities: [...this.capabilities],
+      tools: [...this.tools],
+      maxRisk: this.maxRisk,
+      maxContextTokens: this.maxContextTokens,
+      invocation: this.invocation,
+      costPerTaskUsd: this.costPerTaskUsd,
       status: this.status,
     };
   }
@@ -92,13 +129,17 @@ export class AgentRegistry {
   }
   _builtins() {
     // Built-in defaults — concrete versions/configs are populated by
-    // detect() at runtime.
+    // detect() at runtime. The Level 2 router relies on tools / maxRisk /
+    // maxContextTokens for hard filtering and weighted scoring.
     this._agents.set('claude-code', new AgentDefinition({
       id: 'claude-code',
       provider: 'anthropic',
       executable: 'claude',
       configPaths: ['~/.claude/settings.json', '~/.claude.json'],
       capabilities: ['coding', 'debugging', 'repository_analysis'],
+      tools: ['git', 'node', 'python'],
+      maxRisk: 'high',
+      maxContextTokens: 200000,
     }));
     this._agents.set('codex', new AgentDefinition({
       id: 'codex',
@@ -106,6 +147,9 @@ export class AgentRegistry {
       executable: 'codex',
       configPaths: ['~/.codex/config.toml', '~/.codex/auth.json'],
       capabilities: ['coding', 'debugging'],
+      tools: ['git', 'node'],
+      maxRisk: 'medium',
+      maxContextTokens: 128000,
     }));
   }
   register(agent) {
@@ -132,11 +176,6 @@ export class AgentRegistry {
       validateAgentDefinition(decl);
       const existing = this._agents.get(decl.id);
       if (existing) {
-        // Merge: preserve fields the manifest didn't mention (notably
-        // `version`, which a host-detect populates and the manifest
-        // typically does not). Replace the stored entry wholesale rather
-        // than Object.assign'ing — the prior pattern silently clobbered
-        // existing values to the defaults.
         const merged = new AgentDefinition({
           id: existing.id,
           name: decl.name ?? existing.name,
@@ -145,6 +184,11 @@ export class AgentRegistry {
           executable: decl.executable ?? existing.executable,
           configPaths: decl.configPaths ?? existing.configPaths,
           capabilities: decl.capabilities ?? existing.capabilities,
+          tools: decl.tools ?? existing.tools,
+          maxRisk: decl.maxRisk ?? existing.maxRisk,
+          maxContextTokens: decl.maxContextTokens ?? existing.maxContextTokens,
+          invocation: decl.invocation ?? existing.invocation,
+          costPerTaskUsd: decl.costPerTaskUsd ?? existing.costPerTaskUsd,
           status: existing.status,
         });
         this._agents.set(merged.id, merged);
