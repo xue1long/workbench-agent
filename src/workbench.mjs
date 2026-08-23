@@ -692,6 +692,10 @@ async function runPipelineRun(rest, stdout, stderr, cwd, injected = null) {
     stdout.write(`stages: ${Object.entries(report.stages).map(([id, s]) => `${id}=${s.status}`).join(' ')}\n`);
     if (report.artifacts.length) stdout.write(`artifacts: ${report.artifacts.length}\n`);
     if (report.changedFiles.length) stdout.write(`changedFiles: ${report.changedFiles.join(',')}\n`);
+    try {
+      const { persistTrajectory } = await import('../core/trajectory.mjs');
+      persistTrajectory(store, report);
+    } catch (_) { /* trajectory recording is best-effort */ }
     if (report.finalStatus === 'COMPLETED') return 0;
     if (report.finalStatus === 'QUARANTINED') return 3;
     return 1;
