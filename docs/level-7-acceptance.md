@@ -22,7 +22,7 @@
 1. `0a4bee6` feat: add evidence graph with three provenance classes
 2. `645ef7e` feat: add experiment lab with sandbox and canary routing
 3. `b73188f` feat: add package ecosystem with sandbox verification
-4. `(pending)` test: establish level 7 acceptance gate
+4. `a1f7f10` test: establish level 7 acceptance gate
 
 ## Acceptance Fixtures
 
