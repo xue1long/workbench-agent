@@ -267,3 +267,97 @@ test('safe result reuse: completed nodes with unchanged definitionHash skip re-e
   assert.equal(calls, 1);
   assert.equal(report.nodes.a.node.definitionHash, graph.nodes[0].definitionHash);
 });
+
+// ---------- Level 2 Task 5: bounded parallel fan-out / fan-in -----------
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test('two independent nodes overlap at concurrency 2', async () => {
+  const graph = makeGraph([
+    { id: 'a', goal: 'a', acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+    { id: 'b', goal: 'b', acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+  ]);
+  const gate = deferred();
+  const seen = [];
+  const reportPromise = executeWorkflow(graph, async (node) => {
+    seen.push(node.id);
+    if (seen.length === 1) {
+      // wait until both have been started before resolving
+      await gate.promise;
+    }
+    return ok(node);
+  }, { concurrency: 2 });
+  // Spin briefly to let both nodes enter the handler.
+  await new Promise((r) => setTimeout(r, 5));
+  gate.resolve();
+  const report = await reportPromise;
+  assert.equal(report.executionStatus, 'EXECUTION_SUCCEEDED');
+  assert.equal(report.nodes.a.status, 'SUCCEEDED');
+  assert.equal(report.nodes.b.status, 'SUCCEEDED');
+});
+
+test('concurrency never exceeds the configured bound', async () => {
+  const graph = makeGraph([
+    { id: 'a', goal: 'a', acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+    { id: 'b', goal: 'b', acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+    { id: 'c', goal: 'c', acceptanceCriteria: [{ id: 'cc', verifierRef: 'diff', required: true }] },
+  ]);
+  let inflight = 0;
+  let peak = 0;
+  await executeWorkflow(graph, async () => {
+    inflight += 1;
+    peak = Math.max(peak, inflight);
+    await new Promise((r) => setTimeout(r, 10));
+    inflight -= 1;
+    return ok({});
+  }, { concurrency: 2 });
+  assert.ok(peak <= 2, `peak concurrency ${peak} exceeds 2`);
+});
+
+test('fan-in waits for all dependencies', async () => {
+  const graph = makeGraph([
+    { id: 'a', goal: 'a', acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+    { id: 'b', goal: 'b', acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+    { id: 'c', goal: 'c', dependencies: ['a', 'b'], acceptanceCriteria: [{ id: 'cc', verifierRef: 'diff', required: true }] },
+  ]);
+  const startedAt = new Map();
+  const finishedAt = new Map();
+  await executeWorkflow(graph, async (node) => {
+    startedAt.set(node.id, Date.now());
+    await new Promise((r) => setTimeout(r, 20));
+    finishedAt.set(node.id, Date.now());
+    return ok(node);
+  }, { concurrency: 2 });
+  assert.ok(startedAt.get('c') >= Math.max(finishedAt.get('a'), finishedAt.get('b')));
+});
+
+test('one branch failure blocks only its dependants', async () => {
+  const graph = makeGraph([
+    { id: 'a', goal: 'a', acceptanceCriteria: [{ id: 'aa', verifierRef: 'diff', required: true }] },
+    { id: 'b', goal: 'b', acceptanceCriteria: [{ id: 'bb', verifierRef: 'diff', required: true }] },
+    { id: 'c', goal: 'c', dependencies: ['a'], acceptanceCriteria: [{ id: 'cc', verifierRef: 'diff', required: true }] },
+    { id: 'd', goal: 'd', dependencies: ['b'], acceptanceCriteria: [{ id: 'dd', verifierRef: 'diff', required: true }] },
+  ]);
+  const report = await executeWorkflow(graph, async (node) => {
+    if (node.id === 'a') return { success: false, output: null, evidenceClaims: [], cost: 0, usage: {}, message: 'a failed' };
+    return ok(node);
+  }, { concurrency: 2 });
+  assert.equal(report.executionStatus, 'FAILED');
+  assert.equal(report.nodes.a.status, 'FAILED');
+  assert.equal(report.nodes.b.status, 'SUCCEEDED');
+  assert.equal(report.nodes.c.status, 'BLOCKED');
+  assert.equal(report.nodes.d.status, 'SUCCEEDED');
+});
+
+test('concurrency outside [1,16] is rejected', async () => {
+  const graph = makeGraph([]);
+  await assert.rejects(() => executeWorkflow(graph, async () => ok({}), { concurrency: 0 }),
+    (err) => err.code === 'WORKFLOW_CONCURRENCY_INVALID');
+  await assert.rejects(() => executeWorkflow(graph, async () => ok({}), { concurrency: 17 }),
+    (err) => err.code === 'WORKFLOW_CONCURRENCY_INVALID');
+});
