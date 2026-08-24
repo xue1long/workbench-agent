@@ -77,7 +77,7 @@ Inter-package imports that must be allowed:
 @workbench/adapters        -> @workbench/core
 ```
 
-Anything else (e.g. `core` depending on `apps/`, `adapters` reaching into `intelligence/`) is a layering bug. The current codebase has none of those; CI's `check-syntax` gate prevents accidental new ones.
+Anything else (e.g. `core` depending on `apps/`, `adapters` reaching into `intelligence/`) is a layering bug. The current codebase has none of those; CI's `check-boundaries` gate (added 2026-08-24 by `docs/superpowers/plans/2026-08-24-architecture-boundary-enforcement.md`) prevents accidental new ones. The matrix in that script's `MATRIX` constant is the single source of truth — adding a new subtree means extending the matrix, not weakening the rules.
 
 ## What the engineering gates enforce
 
@@ -87,9 +87,10 @@ Anything else (e.g. `core` depending on `apps/`, `adapters` reaching into `intel
 | Format | `npm run format:check` | CRLF, trailing whitespace, mixed indent, missing final newline |
 | Commit message | `npm run lint:commit` | non-Conventional-Commits, missing scope rules, oversize subject |
 | Version | `npm run version:check` | package.json version missing from CHANGELOG.md |
+| Boundary contract | `npm run check:boundaries` | core -> adapters reverse imports, intelligence <-> laboratory direction, adapters -> apps, src -> concrete adapters (CLI bootstrap only); see "The boundary contract" below |
 | Release readiness | `npm run release:dry-run` | combines all of the above + working-tree cleanliness |
-| Tests | `npm test` | behavioral regressions (497 tests across L1–L7) |
-| CI | `npm run ci` | syntax + tests (the local fast loop) |
+| Tests | `npm test` | behavioral regressions (515 tests across L1–L7 plus the boundary, registry, and adapters-index suites) |
+| CI | `npm run ci` | syntax + boundaries + tests (the local fast loop) |
 | CI (full) | `.github/workflows/ci.yml` | the same + Node 20/22/24 matrix + DevFlow Runtime pytest job |
 
 ## When you add a level
