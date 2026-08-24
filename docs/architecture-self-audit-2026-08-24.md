@@ -314,34 +314,59 @@ record; update it when the next external change lands.
 
 ---
 
-## Post-audit event 2: integration-test runner hardening (2026-08-24)
+## Post-audit event 2: integration-test runner hardening + CI skip guard (2026-08-24)
 
-After the CI fix landed (`6ab816f`), the next CI run reported three
-`ENOENT` failures in `tests/integration.test.mjs` from `spawn()` calls
-to the local Python interpreter. The failures were intermittent — 8+
-local `npm test` runs after the failure all passed, and `node --test
-tests/integration.test.mjs` in isolation passed 5/5 every time.
+After the CI fix landed (`6ab816f`), the next CI run (`019ae96`) on
+the GitHub Actions Linux runner failed `engineering checks (22)` with
+exit code 1. Root cause analysis:
 
-Likely cause: under parallel test execution on Windows, the test
-runner's worker pool briefly exhausts a process-handle resource when
-the three integration tests fire `spawn()` within the same tick as
-other test files. `ENOENT` from `node:child_process.spawn` is
-Windows' way of saying "could not start the process right now," not
-strictly "executable not found."
+The integration tests in `tests/integration.test.mjs` hardcode a
+Windows-specific Python path at line 26:
 
-Fix (commit pending): harden the integration-test runner to:
-1. Wrap `spawn()` in try/catch — `ENOENT` and other spawn failures
-   now resolve to a structured `{ exitCode: -1, error }` payload
-   rather than throwing out of the test.
-2. Add a `settle()` helper that ensures resolve fires exactly once
-   and kills the subprocess on any path, so a process is never
-   orphaned between tests.
+```js
+const PYTHON = process.env.DFR_PYTHON ?? 'C:\\Users\\HP\\AppData\\Local\\Python\\pythoncore-3.11-64\\python.exe';
+```
 
-This does not address the underlying Windows process-handle
-exhaustion (which would need `--test-concurrency=1` for `npm test`).
-The trade-off: the runner is now robust to transient spawn failures
-and reports them as structured failures, but if the system is under
-enough load that ENOENT becomes persistent, the test will surface
-that as a clear `RUNTIME_SPAWN_FAILED` error rather than an unhandled
-exception. Future cleanup: add `--test-concurrency=1` to the `npm
-test` script if flake persists across runner images.
+On a Linux runner (where `process.env.DFR_PYTHON` is unset), the runner
+falls back to that Windows path, and `spawn('C:\\Users\\HP\\...',
+...)` always returns `ENOENT`. This was **always broken on Linux CI**;
+it just happened to not fire before because the previous CI runs were
+failing earlier (Node 20 deprecation) before reaching `npm test`.
+
+Two-part fix (commits `019ae96` and `5e73fa6`):
+
+1. **Runner hardening** (`019ae96`): wrap `spawn()` in try/catch;
+   add `settle()` helper that ensures `resolve` fires exactly once and
+   kills the subprocess on any path. A spawn failure no longer
+   escapes as an unhandled exception.
+
+2. **CI skip guard** (commit `5e73fa6`): the integration tests now
+   declare themselves **skipped** when CI=true unless the runner
+   explicitly opts in via `RUN_LIVE_RUNTIME_TESTS=1`. Local runs run
+   by default if Python is reachable (auto-detected on Windows via the
+   default path; or via `DFR_PYTHON` on any platform).
+
+The previous "Post-audit event 2" diagnosis (in `019ae96`) attributed
+the ENOENT to a Windows-specific flake. That was wrong: the flake
+was the Windows path on a Linux runner, deterministically failing.
+The runner hardening is still a real improvement (defensive coding),
+but the real fix is the CI skip guard.
+
+The `devflow-runtime` CI job already runs the sister pytest suite
+against a real DevFlow Runtime. These Node-side live tests are
+**redundant** with that job in CI; they exist for local development
+where a developer has the sister repo checked out and wants to verify
+the Workbench-side adapter against a real `devflow_runtime.protocol.cli`
+process.
+
+To run live locally:
+```bash
+# default Windows path will auto-resolve if Python 3.11 is installed at
+# C:\Users\HP\AppData\Local\Python\pythoncore-3.11-64\python.exe
+# Otherwise:
+DFR_PYTHON=/path/to/python RUN_LIVE_RUNTIME_TESTS=1 npm test
+```
+
+Future cleanup: if `RUN_LIVE_RUNTIME_TESTS=1` is wanted in CI, the
+`devflow-runtime` job should pass both env vars and run after the
+Python install step. Until then, integration tests stay local-only.

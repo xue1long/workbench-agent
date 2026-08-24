@@ -1,5 +1,18 @@
 // Live Runtime integration: use the stable devflow-runtime CLI via the
 // Workbench DevflowRuntimeAdapter against a real temporary workspace.
+//
+// Local runs (Windows): tests run if DFR_PYTHON is set OR the default
+// Windows Python 3.11 path exists on disk.
+// Local runs (Linux/macOS): tests run if DFR_PYTHON is set.
+// CI runs: tests are SKIPPED unless the CI explicitly sets
+// `RUN_LIVE_RUNTIME_TESTS=1` AND `DFR_PYTHON=<path>`. The CI workflow's
+// `devflow-runtime` job already runs the sister pytest suite against a
+// real DevFlow Runtime; running these Node-side live tests against the
+// same Python interpreter from a sibling checkout is what
+// `RUN_LIVE_RUNTIME_TESTS` is for (set both env vars together).
+//
+// Skipped tests print a one-line notice rather than silently passing,
+// so the gate stays honest about what was and wasn't exercised.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +22,36 @@ import os from 'node:os';
 import { spawnSync, spawn } from 'node:child_process';
 
 import { DevflowRuntimeAdapter } from '../adapters/devflow-runtime.mjs';
+
+const DEFAULT_PYTHON_WINDOWS = 'C:\\Users\\HP\\AppData\\Local\\Python\\pythoncore-3.11-64\\python.exe';
+
+function resolvePython() {
+  if (process.env.DFR_PYTHON) return process.env.DFR_PYTHON;
+  if (process.platform === 'win32') {
+    try {
+      if (fs.statSync(DEFAULT_PYTHON_WINDOWS).isFile()) return DEFAULT_PYTHON_WINDOWS;
+    } catch (_) { /* not present */ }
+  }
+  return null;
+}
+
+const PYTHON = resolvePython();
+// CI must explicitly opt in via RUN_LIVE_RUNTIME_TESTS=1.
+// Local runs run by default if Python is reachable (auto-detected on
+// Windows via the default path; or via DFR_PYTHON on any platform).
+// The CI opt-in exists so a Linux CI runner that happens to have a
+// Python interpreter on PATH doesn't accidentally run live tests that
+// need the devflow-runtime sister repo to be installed.
+const LIVE_ENABLED = !!PYTHON && (
+  process.env.RUN_LIVE_RUNTIME_TESTS === '1'
+  || process.env.CI !== 'true'  // GitHub Actions sets CI=true
+);
+
+if (!LIVE_ENABLED) {
+  test('integration-test guard (skipped in CI / when DFR_PYTHON is unset)', { skip: true }, () => {
+    assert.fail('unreachable: skipped');
+  });
+}
 
 function makeWorkspace() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-live-runtime-'));
@@ -22,8 +65,6 @@ function makeWorkspace() {
   spawnSync('git', ['commit', '-q', '-m', 'init'], { cwd: tmp });
   return tmp;
 }
-
-const PYTHON = process.env.DFR_PYTHON ?? 'C:\\Users\\HP\\AppData\\Local\\Python\\pythoncore-3.11-64\\python.exe';
 
 function executableForLocalCli() {
   return { executable: PYTHON, prefixArgs: ['-m', 'devflow_runtime.protocol.cli'] };
@@ -59,7 +100,7 @@ function adapterRunnerFactory() {
   };
 }
 
-test('DevflowRuntimeAdapter.status reports the enabled runtime over the stable protocol', async () => {
+test('DevflowRuntimeAdapter.status reports the enabled runtime over the stable protocol', { skip: !LIVE_ENABLED }, async () => {
   const workspace = makeWorkspace();
   try {
     const adapter = new DevflowRuntimeAdapter({ runner: adapterRunnerFactory() });
@@ -73,7 +114,7 @@ test('DevflowRuntimeAdapter.status reports the enabled runtime over the stable p
   }
 });
 
-test('DevflowRuntimeAdapter.run applies a single UTF-8 text file and returns finish', async () => {
+test('DevflowRuntimeAdapter.run applies a single UTF-8 text file and returns finish', { skip: !LIVE_ENABLED }, async () => {
   const workspace = makeWorkspace();
   try {
     const adapter = new DevflowRuntimeAdapter({ runner: adapterRunnerFactory() });
@@ -107,7 +148,7 @@ test('DevflowRuntimeAdapter.run applies a single UTF-8 text file and returns fin
   }
 });
 
-test('DevflowRuntimeAdapter.recover reports active status for the freshly applied session', async () => {
+test('DevflowRuntimeAdapter.recover reports active status for the freshly applied session', { skip: !LIVE_ENABLED }, async () => {
   const workspace = makeWorkspace();
   try {
     const adapter = new DevflowRuntimeAdapter({ runner: adapterRunnerFactory() });
@@ -135,7 +176,7 @@ test('DevflowRuntimeAdapter.recover reports active status for the freshly applie
   }
 });
 
-test('DevflowRuntimeAdapter.run refuses when the changeSetSha256 digest does not match', async () => {
+test('DevflowRuntimeAdapter.run refuses when the changeSetSha256 digest does not match', { skip: !LIVE_ENABLED }, async () => {
   const workspace = makeWorkspace();
   try {
     const adapter = new DevflowRuntimeAdapter({ runner: adapterRunnerFactory() });
@@ -160,7 +201,7 @@ test('DevflowRuntimeAdapter.run refuses when the changeSetSha256 digest does not
   }
 });
 
-test('DevflowRuntimeAdapter.run respects the 5-file limit before invoking Runtime', async () => {
+test('DevflowRuntimeAdapter.run respects the 5-file limit before invoking Runtime', { skip: !LIVE_ENABLED }, async () => {
   const workspace = makeWorkspace();
   try {
     const adapter = new DevflowRuntimeAdapter({ runner: adapterRunnerFactory() });
