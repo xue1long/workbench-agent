@@ -22,7 +22,16 @@ function readJson(p) {
 }
 
 function run(cmd, args, opts = {}) {
-  return spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32', ...opts });
+  // On Windows, npm is a `.cmd` shim that Node's spawnSync needs `shell: true`
+  // to execute. We pass `shell: false` everywhere else to keep args correctly
+  // tokenized.
+  const isWin = process.platform === 'win32';
+  return spawnSync(cmd, args, {
+    cwd: ROOT,
+    encoding: 'utf8',
+    shell: isWin && cmd === 'npm',
+    ...opts,
+  });
 }
 
 const pkg = readJson(path.join(ROOT, 'package.json'));
