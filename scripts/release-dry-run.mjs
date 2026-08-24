@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,24 +21,48 @@ function readJson(p) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
-function run(cmd, args, opts = {}) {
-  // On Windows, npm is a `.cmd` shim that Node's spawnSync needs `shell: true`
-  // to execute. We pass `shell: false` everywhere else to keep args correctly
-  // tokenized.
-  const isWin = process.platform === 'win32';
-  return spawnSync(cmd, args, {
-    cwd: ROOT,
-    encoding: 'utf8',
-    shell: isWin && cmd === 'npm',
-    ...opts,
-  });
+// execFileSync returns a Buffer / string on success and throws on failure.
+// Use the capturing variant when we want to inspect stdout even on
+// non-zero exit (e.g. `git status` would never throw but our own npm step
+// loop needs to record the failure).
+//
+// On Windows, `npm.cmd` is a `.cmd` shim that does not survive a bare
+// execFileSync. We invoke npm via its CLI JS file with `node` instead —
+// works everywhere, no shell, no DEP0190.
+function npmCliPath() {
+  // npm-cli.js sits next to the `npm` bin entry. Resolve it via Node's own
+  // lookup, then fall back to the conventional sibling location.
+  const entries = process.execPath ? [process.execPath] : [];
+  // Common locations:
+  return [
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(path.dirname(process.execPath), '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(ROOT, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+}
+function runCapturing(cmd, args, opts = {}) {
+  let finalCmd = cmd;
+  let finalArgs = args;
+  if (cmd === 'npm') {
+    finalCmd = process.execPath;
+    finalArgs = [npmCliPath().find((p) => fs.existsSync(p)) ?? 'npm-cli.js', ...args];
+  } else if (process.platform === 'win32' && cmd === 'npm.cmd') {
+    finalCmd = process.execPath;
+    finalArgs = [npmCliPath().find((p) => fs.existsSync(p)) ?? 'npm-cli.js', ...args];
+  }
+  try {
+    const stdout = execFileSync(finalCmd, finalArgs, { cwd: ROOT, encoding: 'utf8', ...opts });
+    return { stdout, status: 0 };
+  } catch (err) {
+    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', status: err.status ?? 1 };
+  }
 }
 
 const pkg = readJson(path.join(ROOT, 'package.json'));
 const errors = [];
 
 // 1. Working tree clean.
-const status = run('git', ['status', '--short']);
+const status = runCapturing('git', ['status', '--short']);
 if (status.stdout.trim() !== '') {
   errors.push(`working tree not clean: ${status.stdout.split('\n').filter(Boolean).length} file(s) modified`);
 }
@@ -68,10 +92,9 @@ const steps = [
 ];
 const stepResults = [];
 for (const [label, args] of steps) {
-  const r = run('npm', args);
-  const ok = r.status === 0;
-  stepResults.push({ label, ok });
-  if (!ok) errors.push(`${label} failed (exit ${r.status})`);
+  const r = runCapturing('npm', args);
+  stepResults.push({ label, ok: r.status === 0 });
+  if (r.status !== 0) errors.push(`${label} failed (exit ${r.status}): ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
 }
 
 if (errors.length > 0) {
