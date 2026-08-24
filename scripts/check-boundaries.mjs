@@ -295,4 +295,3 @@ process.stdout.write(
   `\nboundary check: ${violations.length} violation(s) across ${files.length} files\n`
 );
 process.exit(1);
-
