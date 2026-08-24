@@ -10,7 +10,7 @@
 // milestone.
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter, applyResult } from '../core/adapters.mjs';
+import { BaseAdapter, applyResult, registerAdapter } from '../core/adapters.mjs';
 import { ResourceState } from '../core/state.mjs';
 
 const EXECUTABLE_CANDIDATES = Object.freeze(['node', 'node.exe']);
@@ -79,3 +79,5 @@ export class NodeAdapter extends BaseAdapter {
     };
   }
 }
+
+registerAdapter({ id: 'node', kind: 'tool', factory: (opts = {}) => new NodeAdapter(opts) });

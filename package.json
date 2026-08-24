@@ -39,12 +39,13 @@
     "start": "node src/workbench.mjs",
     "dashboard": "node apps/web/server.mjs",
     "check": "node scripts/check-syntax.mjs",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
     "format:check": "node scripts/check-format.mjs",
     "lint:commit": "node scripts/check-commit-msg.mjs",
-    "verify": "node scripts/check-syntax.mjs && node scripts/check-format.mjs",
+    "verify": "node scripts/check-syntax.mjs && node scripts/check-boundaries.mjs && node scripts/check-format.mjs",
     "version:check": "node scripts/check-version.mjs",
     "release:dry-run": "node scripts/release-dry-run.mjs",
-    "ci": "node scripts/check-syntax.mjs && node --test tests/*.test.mjs"
+    "ci": "node scripts/check-syntax.mjs && node scripts/check-boundaries.mjs && node --test tests/*.test.mjs"
   },
   "keywords": [
     "agent",

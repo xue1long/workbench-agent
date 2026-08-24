@@ -15,7 +15,7 @@
 // with shell:false.
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter, applyResult } from '../core/adapters.mjs';
+import { BaseAdapter, applyResult, registerAdapter } from '../core/adapters.mjs';
 import { ResourceState } from '../core/state.mjs';
 
 const EXECUTABLE_CANDIDATES = Object.freeze(['claude', 'claude.exe']);
@@ -120,3 +120,5 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     };
   }
 }
+
+registerAdapter({ id: 'claude-code', kind: 'tool', factory: (opts = {}) => new ClaudeCodeAdapter(opts) });

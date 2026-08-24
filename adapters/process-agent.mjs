@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
+import { registerAdapter } from '../core/adapters.mjs';
 
 export class ProcessAgentError extends Error {
   constructor(code, message, details = null) {
@@ -191,3 +192,5 @@ export class ProcessAgentInvoker {
 }
 
 export { ALLOWED_PLACEHOLDERS };
+
+registerAdapter({ id: 'process-agent', kind: 'agent', factory: (opts = {}) => new ProcessAgentInvoker(opts) });

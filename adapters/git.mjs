@@ -11,7 +11,7 @@
 // invoked from CI; production code calls git with the same arg-array shape.
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter, applyResult, okResult, AdapterError } from '../core/adapters.mjs';
+import { BaseAdapter, applyResult, okResult, AdapterError, registerAdapter } from '../core/adapters.mjs';
 
 const REFUSE = new Set(['force-push', 'branch-delete', 'reset-hard']);
 
@@ -185,3 +185,6 @@ export function isSafeRemoteUrl(url) {
   if (url.startsWith('./') || url.startsWith('../') || url.startsWith('/')) return true;
   return false;
 }
+
+
+registerAdapter({ id: 'git', kind: 'tool', factory: (opts = {}) => new GitAdapter(opts) });

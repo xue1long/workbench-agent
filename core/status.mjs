@@ -1,15 +1,16 @@
 import { loadManifest } from './manifest-load.mjs';
 import { validateManifest } from './manifest-validate.mjs';
 import { planFromManifest } from './plan.mjs';
-import { NodeAdapter } from '../adapters/node.mjs';
-import { PythonAdapter } from '../adapters/python.mjs';
-import { UvAdapter } from '../adapters/uv.mjs';
+import { getAdapter } from './adapters.mjs';
 import { ObservedState } from './state.mjs';
+
+// Side-effect import: registers concrete adapters with the registry.
+import '../adapters/index.js';
 
 export async function getWorkspaceStatus(manifestPath) {
   const manifest = loadManifest(manifestPath);
   validateManifest(manifest);
-  const adapters = [new NodeAdapter(), new PythonAdapter(), new UvAdapter()];
+  const adapters = [getAdapter('node'), getAdapter('python'), getAdapter('uv')];
   const states = [];
   for (const adapter of adapters) states.push(await adapter.detect());
   const observed = new ObservedState(states);

@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 
 import { runProcess } from './process-agent.mjs';
 import { createTaskGraph, TaskGraphError } from '../core/task-graph.mjs';
+import { registerAdapter } from '../core/adapters.mjs';
 
 export class ProcessPlannerError extends Error {
   constructor(code, message, details = null) {
@@ -118,3 +119,16 @@ export class ProcessPlanner {
     }
   }
 }
+
+// ProcessPlanner requires { agent, runner } in its constructor; the registry
+// accepts an options bag and forwards it through. The factory passes a stub
+// agent and runner so getAdapter('process-planner') returns a usable
+// instance; production callers override via getAdapter('process-planner', { agent, runner }).
+registerAdapter({
+  id: 'process-planner',
+  kind: 'agent',
+  factory: (opts = {}) => new ProcessPlanner({
+    agent: opts.agent ?? { id: 'planner-stub' },
+    runner: opts.runner ?? runProcess,
+  }),
+});
