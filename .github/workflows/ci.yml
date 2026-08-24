@@ -41,19 +41,26 @@ jobs:
     name: DevFlow Runtime pytest (Ubuntu, Python 3.11)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    defaults:
-      run:
-        working-directory: ../devflow-runtime
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout workbench-agent
+        uses: actions/checkout@v4
         with:
+          lfs: false
+          path: workbench-agent
+      - name: Checkout sister repo (devflow-runtime)
+        uses: actions/checkout@v4
+        with:
+          repository: xue1long/devflow-runtime
+          path: devflow-runtime
           lfs: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install runtime + test deps
+        working-directory: devflow-runtime
         run: |
           python -m pip install -e '.[test]'
       - name: Pytest
+        working-directory: devflow-runtime
         run: python -m pytest -q
