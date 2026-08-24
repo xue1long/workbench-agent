@@ -6,7 +6,7 @@
 
 **Architecture:** Model orchestration as a validated DAG whose nodes declare capability and structured acceptance requirements. A small workflow executor schedules ready nodes and delegates work through injected planner/invoker adapters; routing remains a pure deterministic function over the existing Agent registry. `AuditLog`/`StateStore` retain redacted orchestration projections, while DevFlow EventStore is authoritative for governed Intent, Action, Evidence, State, recovery, and Decision. Agents edit only a temporary Git worktree; Workbench converts the candidate diff into a version-bound Action Proposal and the stable `devflow-runtime` file protocol is the only path that may apply it to the governed workspace.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL projection store/AuditLog, and a pinned Python 3.11 DevFlow Runtime invoked through UTF-8 Intent YAML and Action JSON files; no new Node runtime dependency.
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL projection store/AuditLog, and a pinned Python 3.11 DevFlow Runtime invoked through UTF-8 Intent YAML and Action JSON files; no new Node runtime dependency.
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md`
 
@@ -36,10 +36,10 @@ Current observation on 2026-08-23: `git rev-parse --show-toplevel` fails, Claude
 **Allowed work by gate:**
 
 - Phase 0 Runtime compatibility fixes may start immediately in `D:\5-Project\20260819\devflow-runtime`.
-- After `npm test` and the Repository gate pass, implement Tasks 1–6 in an isolated Workbench worktree using deterministic fixtures.
+- After`npm test` and the Repository gate pass, implement Tasks 1–6 in an isolated Workbench worktree using deterministic fixtures.
 - Start Tasks 7–12 only after the Repository, Provider, and Runtime compatibility gates all pass; before then, do not run a live Agent against the governed workspace or claim Level 2 completion.
 
-- [ ] Run `npm test`; expected: 186 or more tests and zero failures.
+- [ ] Run`npm test`; expected: 186 or more tests and zero failures.
 - [ ] Run `git rev-parse --show-toplevel`.
 - [ ] If Git detection fails, stop and ask the user to choose between initializing this directory and attaching it to an existing repository. Do not initialize automatically.
 - [ ] After Git is available, record `git status --short`, current commit, Node version, OS, and unrelated user changes in `docs/level-2-acceptance.md`.
@@ -130,7 +130,7 @@ test('createTaskGraph rejects cycles', () => {
 
 - [ ] **Step 2: Verify the test fails**
 
-Run: `node --test tests/task-graph.test.mjs`
+Run:`node --test tests/task-graph.test.mjs`
 
 Expected: FAIL because `core/task-graph.mjs` does not exist.
 
@@ -140,11 +140,11 @@ Use plain objects, arrays, `Map`, `Set`, and Kahn's algorithm. Freeze returned t
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/task-graph.test.mjs`
+Run:`node --test tests/task-graph.test.mjs`
 
 Expected: PASS.
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: all existing and new tests PASS.
 
@@ -191,19 +191,19 @@ Also prove that filtering by `runId` returns only that run, a corrupt projection
 
 - [ ] **Step 2: Verify the tests fail**
 
-Run: `node --test tests/store_audit.test.mjs`
+Run:`node --test tests/store_audit.test.mjs`
 
 Expected: FAIL because the orchestration projection wrappers do not exist.
 
 - [ ] **Step 3: Add wrappers without creating a second event bus**
 
-Keep the audit table as the single Workbench observability projection; do not add a trajectory table or a second governed event bus. Store uppercase `type` values: `TASK_CREATED`, `TASK_PLANNED`, `AGENT_SELECTED`, `AGENT_STARTED`, `TOOL_CALLED`, `NODE_EXECUTION_SUCCEEDED`, `TASK_RETRIED`, `PLAN_REVISED`, `CHANGESET_CREATED`, `ACTION_PROPOSED`, `RUNTIME_DECIDED`, `TASK_FAILED`, `TASK_HALTED`, and `TASK_QUARANTINED`. Preserve existing `kind` events for compatibility. Route every wrapper through `record()`. Add `digestText(text)` using `node:crypto` SHA-256 and apply a persistence sanitizer inside `record()` that replaces fields named `prompt`, `context`, `stdout`, or `stderr` with `<field>Digest: { sha256, bytes }` before ordinary key-based redaction. Document in code and tests that this table is rebuildable telemetry: it cannot authorize a change, create trusted Evidence, or declare final completion.
+Keep the audit table as the single Workbench observability projection; do not add a trajectory table or a second governed event bus. Store uppercase `type` values: `TASK_CREATED`, `TASK_PLANNED`, `AGENT_SELECTED`, `AGENT_STARTED`, `TOOL_CALLED`,`NODE_EXECUTION_SUCCEEDED`, `TASK_RETRIED`, `PLAN_REVISED`, `CHANGESET_CREATED`, `ACTION_PROPOSED`, `RUNTIME_DECIDED`, `TASK_FAILED`, `TASK_HALTED`, and `TASK_QUARANTINED`. Preserve existing `kind` events for compatibility. Route every wrapper through `record()`. Add `digestText(text)` using`node:crypto` SHA-256 and apply a persistence sanitizer inside `record()` that replaces fields named `prompt`, `context`, `stdout`, or `stderr` with `<field>Digest: { sha256, bytes }` before ordinary key-based redaction. Document in code and tests that this table is rebuildable telemetry: it cannot authorize a change, create trusted Evidence, or declare final completion.
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/store_audit.test.mjs`
+Run:`node --test tests/store_audit.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -231,7 +231,7 @@ git commit -m "feat: persist orchestration events"
 { success: true, output: {}, evidenceClaims: [], cost: 0, usage: {}, message: '' }
 ```
 
-`WorkflowReport` contains `taskId`, `runId`, `executionStatus`, `startedAt`, `finishedAt`, `nodes`, `cost`, and `evidenceClaims`. `executionStatus` is `EXECUTION_SUCCEEDED`, `FAILED`, or `HALTED`; this type deliberately has no `COMPLETED` value and carries no final governance authority.
+`WorkflowReport` contains `taskId`, `runId`, `executionStatus`, `startedAt`, `finishedAt`,`nodes`, `cost`, and `evidenceClaims`. `executionStatus` is `EXECUTION_SUCCEEDED`, `FAILED`, or `HALTED`; this type deliberately has no `COMPLETED` value and carries no final governance authority.
 
 - [ ] **Step 1: Write failing sequential execution tests**
 
@@ -252,7 +252,7 @@ test('failed nodes block dependants', async () => {
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
 Expected: FAIL because the runtime does not exist.
 
@@ -262,9 +262,9 @@ Keep all state local to one execution. Generate `runId` with `crypto.randomUUID(
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -305,19 +305,19 @@ test('retry never exceeds maxAttempts', async () => {
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
 Expected: FAIL on missing retry/fallback behavior.
 
 - [ ] **Step 3: Implement bounded recovery**
 
-Use loops with explicit numeric ceilings. Persist every attempt and routing change. Replan may be called once per run and produces `graphRevision: 2`. Validate the replacement graph before continuing. Reuse an earlier completed result only when `node.id` and `node.definitionHash` are unchanged; otherwise schedule the node again. Never reuse a failed, blocked, running, or side-effecting result whose verification evidence is missing. A failed reviewer must produce a graph with `correction → verification → review`; reject a revised graph that omits any of those three kinds.
+Use loops with explicit numeric ceilings. Persist every attempt and routing change. Replan may be called once per run and produces `graphRevision: 2`. Validate the replacement graph before continuing. Reuse an earlier completed result only when`node.id` and`node.definitionHash` are unchanged; otherwise schedule the node again. Never reuse a failed, blocked, running, or side-effecting result whose verification evidence is missing. A failed reviewer must produce a graph with `correction → verification → review`; reject a revised graph that omits any of those three kinds.
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -344,7 +344,7 @@ Use deferred promises to prove two independent nodes overlap at `concurrency: 2`
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
 Expected: FAIL because execution remains sequential.
 
@@ -354,9 +354,9 @@ Use `Promise.race` over a `Map` of running promises. Do not add a queue dependen
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/workflow-runtime.test.mjs`
+Run:`node --test tests/workflow-runtime.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -421,7 +421,7 @@ test('selectAgent explains a deterministic capability match', () => {
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/capabilities.test.mjs tests/agent-router.test.mjs`
+Run:`node --test tests/capabilities.test.mjs tests/agent-router.test.mjs`
 
 Expected: FAIL because the capability helpers and router do not exist.
 
@@ -431,9 +431,9 @@ Implement capability definitions as frozen plain objects and pure query function
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/capabilities.test.mjs tests/agent-router.test.mjs tests/config_models.test.mjs`
+Run:`node --test tests/capabilities.test.mjs tests/agent-router.test.mjs tests/config_models.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -490,7 +490,7 @@ Also prove unauthorized paths, stale `state_revision`, missing required verifier
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/change-sandbox.test.mjs tests/devflow-runtime.test.mjs`
+Run:`node --test tests/change-sandbox.test.mjs tests/devflow-runtime.test.mjs`
 
 Expected: FAIL because the sandbox collector and adapter do not exist.
 
@@ -500,9 +500,9 @@ Use `git worktree add --detach <sandboxPath> <baseCommit>` with `shell: false`. 
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/change-sandbox.test.mjs tests/devflow-runtime.test.mjs`
+Run:`node --test tests/change-sandbox.test.mjs tests/devflow-runtime.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -542,7 +542,7 @@ test('invoker refuses a cwd outside the change sandbox', async () => {
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/process-agent.test.mjs`
+Run:`node --test tests/process-agent.test.mjs`
 
 Expected: FAIL because the invoker does not exist.
 
@@ -552,9 +552,9 @@ Validate the configured executable and literal argument array; substitute only t
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/process-agent.test.mjs tests/config_models.test.mjs`
+Run:`node --test tests/process-agent.test.mjs tests/config_models.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -573,7 +573,7 @@ git commit -m "feat: invoke agents inside change sandboxes"
 
 **Interfaces:**
 - Produces: `ProcessPlannerError`.
-- Produces: `new ProcessPlanner({ invoker, agent })`.
+- Produces:`new ProcessPlanner({ invoker, agent })`.
 - Produces: `ProcessPlanner.plan(task, { sandboxPath, signal }) -> Promise<TaskGraph>`.
 - The configured planner receives a prompt file and must write one JSON plan file; stdout is diagnostic only.
 
@@ -592,7 +592,7 @@ test('planner rejects a cyclic provider response', async () => {
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/process-planner.test.mjs`
+Run:`node --test tests/process-planner.test.mjs`
 
 Expected: FAIL because the planner adapter does not exist.
 
@@ -602,9 +602,9 @@ Reuse the safe spawning rules from `ProcessAgentInvoker` through a shared export
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/process-planner.test.mjs tests/process-agent.test.mjs`
+Run:`node --test tests/process-planner.test.mjs tests/process-agent.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -648,7 +648,7 @@ Prove planner output validation, one routing decision per attempted node, sandbo
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/orchestrator.test.mjs`
+Run:`node --test tests/orchestrator.test.mjs`
 
 Expected: FAIL because the service does not exist.
 
@@ -658,9 +658,9 @@ Do not add Team Composer, Supervisor, Workflow Generator, a second Action Gatewa
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/orchestrator.test.mjs`
+Run:`node --test tests/orchestrator.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -692,7 +692,7 @@ Prove help output, missing arguments, invalid/cyclic simulation graph, concurren
 
 - [ ] **Step 2: Verify failure**
 
-Run: `node --test tests/cli.test.mjs`
+Run:`node --test tests/cli.test.mjs`
 
 Expected: FAIL because `task` commands are unknown.
 
@@ -702,9 +702,9 @@ Keep the CLI thin. `simulate` loads JSON and uses deterministic handlers. `run` 
 
 - [ ] **Step 4: Verify focused and full suites**
 
-Run: `node --test tests/cli.test.mjs`
+Run:`node --test tests/cli.test.mjs`
 
-Run: `npm test`
+Run:`npm test`
 
 Expected: PASS.
 
@@ -752,7 +752,7 @@ test('OAuth workflow emits complete evidence and routing history', async () => {
 
 - [ ] **Step 2: Verify the tests expose any missing behavior**
 
-Run: `node --test tests/orchestration_e2e.test.mjs`
+Run:`node --test tests/orchestration_e2e.test.mjs`
 
 Expected before final fixes: at least one acceptance assertion fails.
 
@@ -777,7 +777,7 @@ Expected: zero test-runner failures in all four commands; nine orchestration fix
 
 - [ ] **Step 5: Run the opt-in live provider gate**
 
-In a fresh temporary Git repository copied from `fixtures/live/oauth-demo`, ask the configured planner/Agent to implement a bounded offline OAuth demonstration: generate an authorization URL, validate callback `state`, render login/success UI, and make `npm test` pass. No real provider credentials or network calls are allowed, and the final candidate may create/replace at most five UTF-8 text files. Verify:
+In a fresh temporary Git repository copied from `fixtures/live/oauth-demo`, ask the configured planner/Agent to implement a bounded offline OAuth demonstration: generate an authorization URL, validate callback `state`, render login/success UI, and make`npm test` pass. No real provider credentials or network calls are allowed, and the final candidate may create/replace at most five UTF-8 text files. Verify:
 
 ```text
 natural-language goal accepted

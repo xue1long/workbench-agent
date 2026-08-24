@@ -6,7 +6,7 @@
 
 **Architecture:** Keep one zero-dependency Node module and CLI. The module owns manifest parsing, validation, detection, diffing, and planning; the CLI only loads a file and prints the plan. M1 deliberately uses an in-memory observed state and does not install software, open SQLite, or start a UI.
 
-**Tech Stack:** Node.js 20+ built-ins (`node:test`, `node:fs`); no package installation required.
+**Tech Stack:** Node.js 20+ built-ins (`node:test`,`node:fs`); no package installation required.
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 1：Workspace Runtime 开发实施规格.md`, sections 37 and 38 (M1 scope).
 
@@ -40,7 +40,7 @@ test('plan reports update, skip, and install', () => {
 });
 ```
 
-- [ ] **Step 2: Run `node --test tests/m1_plan.test.mjs` and confirm it fails because the module/API is missing.**
+- [ ] **Step 2: Run`node --test tests/m1_plan.test.mjs` and confirm it fails because the module/API is missing.**
 
 ### Task 2: Implement the minimal manifest, detection, diff, and plan
 

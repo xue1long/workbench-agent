@@ -6,7 +6,7 @@
 
 **Architecture:** `core/intelligence/sources.mjs` registers immutable source metadata (canonical URL, retrieval timestamp, tier, license, terms, retention class, permission) and enforces the "store full content only when permission + license + retention are recorded, otherwise metadata + link only" rule. `core/intelligence/ingest.mjs` is the idempotent, versioning ingestion pipeline (dedupe by canonical URL / content hash / DOI / repository identity; unchanged → no-op; changed → new version preserving the old extraction). `core/intelligence/normalize.mjs` produces the structured extraction. `core/intelligence/patterns.mjs` ranks sources by tier and generates Candidate Patterns; only Tier 1/2 sources can make an experiment-eligible candidate — secondary sources alone cannot.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL `StateStore` + content-addressed object pattern; no new dependency, no network calls in the automated suite (fixtures stand in for real sources).
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL `StateStore` + content-addressed object pattern; no new dependency, no network calls in the automated suite (fixtures stand in for real sources).
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md` (Level 6) and `docs/superpowers/plans/2026-08-23-agent-workbench-level-2-to-7-execution.md` Release 6.0.
 
@@ -20,13 +20,13 @@
 - Changed sources create a new version while the old extraction remains readable.
 - Tier 1/2 sources may produce experiment-eligible candidates; Tier 3/4 sources are discovery-only and cannot.
 - Every Candidate Pattern is traceable to the exact source record that produced it.
-- Every task begins with a failing test and ends with `npm test` passing (451 baseline).
+- Every task begins with a failing test and ends with`npm test` passing (451 baseline).
 
 ---
 
 ## Phase 0: Execution readiness
 
-- [ ] Run `npm test` in the worktree; expected: 451 tests, zero failures.
+- [ ] Run`npm test` in the worktree; expected: 451 tests, zero failures.
 - [ ] Create isolated worktree `workbench-l6` from main; record baseline in `docs/level-6-acceptance.md`.
 
 ---
@@ -83,7 +83,7 @@
 - Create: `tests/intelligence-normalize.test.mjs`
 
 **Interfaces:**
-- Produces: `normalizeSource({ source, content, extractor = null }) -> NormalizedRecord`:
+- Produces:`normalizeSource({ source, content, extractor = null }) -> NormalizedRecord`:
   ```js
   { sourceId, version, problem, method, evidence, limitations, applicableCapability, provenance,
     tier, normalizedAt }

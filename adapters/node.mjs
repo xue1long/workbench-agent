@@ -74,7 +74,7 @@ export class NodeAdapter extends BaseAdapter {
     return {
       success: matches,
       status: matches ? 'PASS' : 'WARNING',
-      message: matches ? '' : `node observed ${observed.version ?? 'missing'} != desired ${desired}`,
+      message: matches ? '' :`node observed ${observed.version ?? 'missing'} != desired ${desired}`,
       details: { observed: observed.version, desired },
     };
   }

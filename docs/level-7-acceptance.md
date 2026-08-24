@@ -6,7 +6,7 @@
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
-| Workbench baseline | PASS | `npm test` 474/474 before Level 7 tasks |
+| Workbench baseline | PASS |`npm test` 474/474 before Level 7 tasks |
 | Level 6 exit gate | PASS | `docs/level-6-acceptance.md`; merged `10f03b7` |
 | Level 7 full suite | PASS | 497/497 (second full pass: 497/497) |
 | E2E acceptance | PASS | 5/5 in `tests/level7_e2e.test.mjs` |

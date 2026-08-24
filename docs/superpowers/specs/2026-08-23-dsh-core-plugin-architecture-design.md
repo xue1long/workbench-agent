@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-23
 
-**Status:** Revised after architecture audit; pending final user review
+**Status:** Revised after fourth architecture audit; approved for implementation planning
 
 **Decision:** Use upstream DeepSeek Harness (`dsh`) as the product host and Agent runtime. Deliver Agent Workbench capabilities as out-of-tree dsh plugins and a Workbench profile. Do not maintain a product fork of dsh.
 
@@ -31,6 +31,9 @@ This design changes the product host, not those goals. dsh becomes responsible f
 8. Prevent every pre-approval Agent capability from writing to the canonical workspace.
 9. Keep complete dsh session history encrypted and lifecycle-managed while retaining digest-only governance projections.
 10. Support one exact dsh version at a time through a repeatable candidate-upgrade lane.
+11. Bind every human change approval to an immutable candidate snapshot and the exact canonical state it may modify.
+12. Keep secret values outside model-visible and persisted Session data, even when Session storage is encrypted.
+13. Make every approval source attributable to a trusted local or configured automation identity.
 
 ## 3. Non-goals
 
@@ -49,6 +52,8 @@ This design changes the product host, not those goals. dsh becomes responsible f
 
 The repository remains an independent pnpm plugin monorepo running on Node.js 24 LTS. It consumes a published dsh release and locks one exact version in the package manifest and lockfile. Version ranges and multi-version compatibility are not used for production builds.
 
+Production and upgrade-candidate installs use the repository package manager with `--frozen-lockfile` and verify lockfile integrity. Every promoted release records a dependency manifest or SBOM, third-party license notices, and vulnerability-scan evidence. Known-exploited, Critical, and applicable High vulnerabilities block promotion. Any other accepted finding requires a named owner, rationale, and expiry; an expired exception blocks the next build or upgrade.
+
 The dsh source tree is treated as read-only. Workbench behavior is mounted through an out-of-tree Profile and Bundle. Discovery of a new release creates an upgrade candidate; ordinary releases must be evaluated within 30 days and security releases within 72 hours. Promotion occurs only after compatibility, WebUI, migration, and governed-task tests pass. A failed candidate does not force support for that version: Workbench remains on the current locked version and may evaluate a later release directly.
 
 One temporary WebUI patch is permitted only when dsh lacks a necessary general extension point. The patch must:
@@ -61,7 +66,7 @@ One temporary WebUI patch is permitted only when dsh lacks a necessary general e
 
 No Host, Agent Loop, Session, Tool, Sandbox, or Storage source patch is allowed.
 
-For a critical upstream vulnerability, Workbench first disables the affected capability. If disabling it cannot make the product safe, a temporary security build may pin an exact reviewed upstream commit. That build requires a linked upstream Issue or pull request, the complete release gate, and review every seven days. It must never become a permanent fork.
+For a critical upstream vulnerability, Workbench first disables the affected capability. If disabling it cannot make the product safe, a temporary security build may pin an exact reviewed upstream commit. That build requires reproducible package artifacts with recorded source commit, build parameters, and checksums; a linked upstream Issue or pull request; the complete release gate; and review every seven days. It must never become a permanent fork.
 
 ## 5. Target Architecture
 
@@ -143,6 +148,10 @@ Responsibilities:
 
 Its external interface is a deep `ctx.workspaceRuntime` module. Callers request status, plan, apply, sync, restore, or rollback without learning adapter selection, lockfile format, snapshot layout, or credential implementation.
 
+Mutation ownership is explicit and non-overlapping. Writes inside the Git repository are owned by DevFlow unless they target an explicitly listed Workbench-private metadata directory. `workbench-runtime` owns repository-external host environment state, tool installations, Workbench runtime configuration, snapshots, and project bootstrap resources. Every mutating manifest step declares its owner, resource kind, and target; an unclassified or multiply owned target is rejected before execution.
+
+`RuntimeApproval` authorizes one exact deterministic Runtime plan, including apply, sync, restore, and rollback. It binds workspace identity, plan digest, observed-state revision and preconditions, resource kinds and targets, authenticated actor, issue time, and expiry. A state mismatch or changed plan requires new approval. `RuntimeApproval`, `ExecutionApproval`, and `ChangeApproval` have distinct identifiers, UI labels, audit records, and error types and can never substitute for one another.
+
 ### 8.2 `workbench-governed-tasks`
 
 This plugin owns deterministic, evidence-governed work. It does not replace the dsh Workflow Engine for ordinary model-authored workflows.
@@ -163,26 +172,40 @@ Responsibilities:
 
 Its external interface is a deep `ctx.governedTasks` module. The interface exposes task submission, inspection, change approval, cancellation, and resume. Agent invocation, sandbox lifecycle, routing, and DevFlow protocol details remain internal.
 
-Every governed run has one detached Git worktree. Model-visible and tool capabilities receive that worktree as their only workspace root: Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent execution must share the same candidate execution world. The canonical workspace is not mounted writable or passed to the Agent. Mutating nodes execute serially; only nodes proven read-only may overlap. Parallel mutating worktrees and merge orchestration are deferred until measured need.
+Every governed run has one isolated candidate checkout. The preferred checkout is a detached Git worktree only when the Phase 0 sandbox proves that Agent-visible Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent execution cannot follow the worktree Git administration link into the canonical repository's `.git` data. Git control-plane operations and shared Git metadata are never exposed to the Agent. If that isolation cannot be enforced, the selected implementation is one disposable full clone with independent Git metadata; the product does not switch modes dynamically. Model-visible and tool capabilities receive the selected candidate checkout as their only workspace root. The canonical working tree, refs, index, configuration, and object database are not writable or passed to the Agent. Each node declares `executionMode: read-only | mutating`. A read-only node receives only enforced read-only providers and tools; undeclared or unverifiable nodes are treated as mutating.
 
-Every governed run owns one supervisor dsh Session. Each node attempt owns one child Session. `workbench-governed-tasks` persists an immutable correlation record:
+Mutating node attempts execute serially from the latest verified run-local checkpoint. Checkpoints are Workbench-controlled content snapshots outside shared Git metadata, not Agent-created commits or index state. A successful attempt creates the next checkpoint; a failed, timed-out, cancelled, fallback, or retried attempt restores the prior checkpoint before any later node starts. Read-only nodes may overlap only with other read-only nodes on the same immutable checkpoint and never with a mutating attempt. Parallel mutating checkouts and merge orchestration are deferred until measured need.
+
+Every governed run owns one supervisor dsh Session. Each node attempt owns one child Session. Correlation data is an append-only event stream because its identifiers arise at different stages. Existing events are never updated; a rebuildable projection presents the current run view:
 
 ```text
-workbenchRunId
-├── supervisorSessionId
-├── nodeId
-│   └── attempt → childSessionId
-├── devflowSessionId
-├── candidateDigest
-└── changeApprovalId
+RunCreated(workbenchRunId)
+SupervisorSessionBound(supervisorSessionId)
+NodeAttemptStarted(nodeId, attempt, childSessionId)
+CandidateSnapshotted(candidateDigest, baseCommit, stateRevision)
+ChangeApproved(changeApprovalId)
+DevFlowSessionReserved(devflowSessionId)
+ApprovalDispatchStarted(actionId, actionDigest, idempotencyKey)
+ApprovalDispatchConfirmed(actionId)
+RunCompleted(decisionId)
 ```
 
-The two approval kinds are intentionally separate:
+The two governed-task approval kinds are intentionally separate:
 
-- `ExecutionApproval` is dsh's one-shot authorization for a tool action inside the candidate worktree.
-- `ChangeApproval` is Workbench authorization to submit one exact candidate to DevFlow. It binds Intent identity and version, state revision, candidate digest, actor, issue time, and expiry.
+- `ExecutionApproval` is dsh's one-shot authorization for a tool action inside the candidate checkout.
+- `ChangeApproval` is Workbench authorization to submit one immutable Action envelope to DevFlow. It binds workspace identity, Intent identity and version, policy version, required acceptance and verifier definitions, base commit, state revision, Candidate Snapshot digest, every target entry precondition, authenticated actor, issue time, and expiry. Each target entry contains its normalized canonical path, expected kind (`absent` or `regular`), expected content digest, and expected file mode. Symbolic links, path aliases, case-colliding targets, and paths whose resolved location escapes the repository are rejected.
 
 An `ExecutionApproval` can never satisfy a `ChangeApproval`; the identifiers, UI labels, audit records, and error types are distinct.
+
+Candidate collection freezes the complete edit payload before approval. Collection and application both validate target identity with `lstat`, normalized path comparison, and resolved-path containment. `actionDigest` is SHA-256 over a canonical serialization of the complete bound Action envelope, including workspace identity and verification policy; it is also the workspace-scoped idempotency key. Submission revalidates the Action digest, snapshot digest, base commit, state revision, verification policy, and every target entry precondition against canonical state. Any mismatch, expiry, different Action, or post-snapshot candidate change invalidates the approval and requires a new snapshot and approval.
+
+A `ChangeApproval` authorizes one logical Action, not one transport attempt. `workbench-governed-tasks` owns an internal durable dispatch state machine:
+
+```text
+APPROVED → DISPATCHING → CONFIRMED | REJECTED
+```
+
+The stable `actionId`, `actionDigest`, `idempotencyKey`, caller-known `devflowSessionId`, and Candidate Snapshot digest are committed atomically before the first DevFlow call. An identical retry may redeliver only that Action under the same idempotency key; the approval cannot authorize a different Action, candidate, workspace, or verification policy. After restart or an uncertain response, Workbench recovers by the reserved DevFlow Session identifier or queries the stable idempotency key before retrying. If the DevFlow protocol supports neither method, Phase 0 fails. An unresolved outcome is quarantined. This state machine and its outbox remain internal to the deep `ctx.governedTasks` module.
 
 The completion rule is immutable:
 
@@ -274,7 +297,7 @@ Each fact has one writable owner:
 | --- | --- |
 | User/model/tool/session events | dsh Session Log through encrypted Session Persistence |
 | Workspace identity and session membership | dsh Workspace Registry |
-| Manifest, lockfile, snapshot metadata, observed/applied state | `workbench-runtime` |
+| Manifest, lockfile, snapshot metadata, observed/applied state, `RuntimeApproval` | `workbench-runtime` |
 | Task, node, routing, candidate, `ExecutionApproval`, `ChangeApproval`, and DevFlow correlation projections | `workbench-governed-tasks` |
 | Canonical governed Intent, Action, Evidence, State, Decision | DevFlow EventStore |
 | Knowledge metadata and reviewed memory | `workbench-knowledge` |
@@ -284,17 +307,21 @@ Each fact has one writable owner:
 
 New plugin state uses the dsh Storage interface. Large artifact content is stored as content-addressed files. Plugin storage contains hashes, locations, scopes, versions, and provenance rather than duplicate large content. Legacy Workbench JSONL is migration input and a read-only archive, never the new runtime store.
 
+Phase 0 must prove that the selected dsh Storage path provides workspace namespacing, atomic commit, exclusive migration locking, durable schema markers, crash recovery, and idempotent replay. It must also prove that a plugin can register or replace the provider through a usable dsh seam. If native Storage lacks required semantics but the seam exists, Workbench supplies one minimal persistence provider behind that interface; business plugins do not implement separate stores. If neither path works, migration stops rather than creating a side-channel store.
+
 Migration may read legacy `.workbench` data and dsh data concurrently, but writes go to only one owner. No dual-write migration is permitted.
 
 ### Session privacy and encryption
 
 dsh Session history is operational product data, not governance audit data. Complete user messages, model messages, tool events, and stream chunks may be persisted only through a Workbench-selected encrypted Session Persistence provider.
 
-- Records are encrypted with AES-256-GCM using a fresh nonce per record or authenticated segment.
+- Each record is independently encrypted with AES-256-GCM using a unique random 96-bit nonce. Authenticated additional data contains the storage format version, session identifier, sequence number, and event type. Each record stores its non-secret `keyId` so later key rotation does not require guessing.
 - A random installation master key is stored through dsh Credentials in the operating system credential store; it is never written beside session data.
+- Secret values are resolved only inside trusted credential-consuming adapters. Agent-controlled Filesystem, Shell, PTY, generic Subprocess, prompts, Session events, and governance projections receive secret references or redacted values, never credentials. An MCP or external tool that needs a credential receives it only in its isolated adapter process and must not echo it through tool results. Redaction occurs before model exposure and persistence and is required even though the Session store is encrypted.
 - Sessions expire after 30 days by default. Users may pin a session or delete it immediately.
 - Deletion removes the encrypted session data and associated unreferenced artifacts while preserving separately required redacted governance records.
 - A missing or unreadable key makes the affected sessions unavailable with an explicit recovery diagnostic; the provider never creates a replacement key over existing ciphertext.
+- Version 1 encrypted sessions are installation-bound and cannot be restored on another machine by copying the workspace. Any future export is an explicit, separately designed decrypted-and-redacted artifact rather than a copy of the encrypted store.
 - Governance audit, trajectory, benchmark exchange, and Evidence projections continue to exclude raw prompt, raw context, stdout, and stderr, storing only digests, byte counts, safe summaries, paths, identifiers, and provenance.
 
 ## 13. Governed Task Flow
@@ -302,15 +329,16 @@ dsh Session history is operational product data, not governance audit data. Comp
 ```text
 1. WebUI or tool submits a task to ctx.governedTasks.
 2. The plugin validates or constructs the deterministic TaskGraph.
-3. The plugin creates one detached Git worktree and supervisor dsh Session for the run.
-4. Ready nodes are routed to child dsh Agent/Subagent Sessions whose complete execution world is bound to that worktree.
-5. dsh obtains `ExecutionApproval` where a candidate-worktree tool policy requires it.
-6. Workbench records Agent output as Evidence Claims and collects candidate files.
-7. The WebUI presents the exact candidate digest and diff for `ChangeApproval`.
-8. Without `ChangeApproval`, the run remains AWAITING_APPROVAL and no canonical mutation occurs.
-9. After `ChangeApproval`, the DevFlow adapter submits the version-bound Action and immutable correlation identifiers.
-10. DevFlow alone applies through its Action Gateway and emits trusted verifier Evidence.
-11. Workbench maps a valid finish Decision to COMPLETED and projects the result into dsh-visible status.
+3. The plugin creates one isolated candidate checkout and supervisor dsh Session for the run.
+4. Ready nodes are routed to child dsh Agent/Subagent Sessions whose complete execution world is bound to that checkout and excludes Git control-plane metadata.
+5. dsh obtains `ExecutionApproval` where a candidate-checkout tool policy requires it.
+6. Each mutating node attempt starts from the latest verified checkpoint; Workbench restores failures and checkpoints successes. Read-only nodes run only against an immutable checkpoint.
+7. Workbench records Agent output as Evidence Claims and freezes a Candidate Snapshot containing the complete edits, base commit, state revision, and normalized target entry preconditions.
+8. The WebUI presents that exact Candidate Snapshot digest and diff for `ChangeApproval`.
+9. Without `ChangeApproval`, the run remains AWAITING_APPROVAL and no canonical mutation occurs.
+10. After `ChangeApproval`, Workbench atomically persists the stable Action, reserved DevFlow Session identifier, and DISPATCHING outbox state; revalidates every bound precondition and verification policy; and submits the frozen payload. A mismatch returns the run to candidate review; it never applies stale approval.
+11. DevFlow alone applies through its Action Gateway and emits trusted verifier Evidence. Identical delivery retries use the same idempotency key.
+12. Workbench reconciles uncertain dispatches, records confirmation, maps a valid finish Decision to COMPLETED, and projects the result into dsh-visible status.
 ```
 
 A cancellation, deadline breach, invalid candidate, approval mismatch, failed verifier, corrupt EventStore, or uncertain recovery prevents completion. Corrupt or uncertain governed state becomes quarantined rather than guessed or silently repaired.
@@ -328,7 +356,9 @@ The WebUI is extended in this order:
 
 Workbench business behavior never lives in the patch. The patch may only make a generic extension contribution possible. If the required result needs business-page or application-framework modifications, WebUI migration stops until dsh provides the seam; a second frontend is not created.
 
-The WebUI listens on loopback by default. Mutating Remote methods validate Origin and CSRF protection in addition to their domain authorization. Non-loopback access is deferred until an authenticated, TLS-protected deployment design is approved; an unauthenticated remote client never receives approval controls.
+The WebUI listens on loopback by default. Mutating Remote methods validate Origin and CSRF protection in addition to an authenticated local session. The authenticated actor is derived server-side and cannot be supplied or overridden by the request body. Workbench reuses a verified dsh local-authentication session when available; otherwise it uses an unguessable launch-scoped credential that is excluded from URLs and logs. If neither can be provided safely, WebUI mutation and approval controls remain disabled. Non-loopback access is deferred until an authenticated, TLS-protected deployment design is approved.
+
+The same identity rule applies outside the WebUI. Interactive Headless and command approval derives the actor from the operating-system principal. Non-interactive approval requires a preconfigured trusted automation identity and records its authentication method. A caller-provided display name is never accepted as approval identity.
 
 The first WebUI release contains functional workspace, task, approval, and Evidence contributions. Knowledge and evaluation contributions are added when their plugins migrate. Visual redesign follows functional parity and upgrade compatibility.
 
@@ -338,27 +368,32 @@ The first WebUI release contains functional workspace, task, approval, and Evide
 - Optional plugin unavailable: dependent Workbench navigation and tools are hidden or marked unavailable; unrelated dsh capabilities continue.
 - Required core plugin unavailable: governed mutations are disabled; read-only status remains available when safe.
 - DevFlow unavailable: candidates may be preserved, but approval cannot cause mutation and completion cannot be reported.
+- Approval dispatch interrupted or uncertain: reconcile the stable Action and idempotency key with DevFlow; quarantine the run if the outcome cannot be proven.
 - Storage migration failure: legacy data remains untouched; the new plugin refuses write activation.
+- Storage capability failure: Workbench uses the approved minimal provider or refuses write activation; it never assumes missing atomicity or locking.
+- Runtime plan or observed-state mismatch: `RuntimeApproval` is invalidated and no apply, sync, restore, or rollback step begins.
 - Web Client incompatibility: Host plugins remain usable through Headless/commands; the candidate dsh upgrade is rejected.
 - Temporary patch conflict: dependency installation or CI fails before packaging.
 - Session key missing or unreadable: encrypted sessions remain untouched and unavailable; the system does not replace the key or discard ciphertext.
-- Failed, quarantined, or awaiting-approval run: its worktree is retained for seven days with path, digest, and expiry metadata. Users may delete it early or pin it. Successfully verified worktrees are cleaned automatically.
+- Candidate or canonical-state mismatch after approval: the approval is invalidated, no mutation occurs, and a new snapshot requires new approval.
+- Mutating node attempt failure: restore the prior verified checkpoint before retry, fallback, or later-node execution.
+- Failed, quarantined, or awaiting-approval run: its candidate checkout is retained for seven days with owner-only filesystem permissions, path, digest, and expiry metadata. Users may delete it early or pin it. Cleanup failure is surfaced and retried; successfully verified checkouts are cleaned automatically. Candidate retention never includes resolved credentials.
 
 ## 16. Migration Route
 
 ### Phase 0: Compatibility spike
 
-Prove an out-of-tree Profile, Host Plugin, Client Plugin, Remote call, Conversation Node, Settings Card, Workspace access, Agent/Subagent execution, complete candidate-worktree execution binding, encrypted Session Persistence, Sandbox use, and one dsh version upgrade. Select and lock the exact dsh release only after this gate passes.
+Prove an out-of-tree Profile, Host Plugin, Client Plugin, Remote call, authenticated Web and Headless approval, Conversation Node, Settings Card, Workspace access, Agent/Subagent execution, complete candidate-checkout execution binding, denial of Agent access to shared Git administration data, encrypted and pre-persistence-redacted Session Persistence, trusted-adapter-only secret injection, Sandbox use, required Storage atomicity/locking/recovery/provider-registration semantics, stable DevFlow recovery by reserved Session identifier or idempotency key, and one dsh version upgrade. Scan Session stores, candidate checkouts, temporary files, journals/WAL, indices, and error logs to prove secret values are absent. Select and lock the exact dsh release and one candidate-checkout isolation mode only after this gate passes.
 
-The spike is a hard architecture gate. Migration stops if plugins cannot guarantee candidate-only Filesystem/Shell/PTY/LSP/Subprocess execution, encrypted sessions, distinct approval semantics, or both Web and Headless activation. Host-core patches cannot waive these failures.
+The spike is a hard architecture gate. Migration stops if plugins cannot guarantee candidate-only Filesystem/Shell/PTY/LSP/Subprocess execution without shared Git metadata access, checkpoint-restored attempts, immutable-checkpoint read concurrency, secret-safe encrypted sessions, trusted approval identity on every interface, recoverable DevFlow dispatch, required Storage semantics or provider registration, distinct approval semantics, or both Web and Headless activation. Host-core patches cannot waive these failures.
 
 ### Phase 1: Plugin skeleton
 
-Adopt Node.js 24 LTS and the exact repository pnpm version. Create the narrow `dsh-compat`, synchronized Workbench release metadata, the Workbench Profile, and the three initial plugins. Boot dsh Web and Headless with and without the Workbench Profile.
+Adopt Node.js 24 LTS and the exact repository pnpm version. Enforce frozen-lockfile installation, integrity verification, dependency inventory, license notices, and vulnerability scanning. Create the narrow `dsh-compat`, synchronized Workbench release metadata, the Workbench Profile, and the three initial plugins. Boot dsh Web and Headless with and without the Workbench Profile.
 
 ### Phase 2: Governed vertical slice
 
-Deliver one path: open workspace, submit one-node task, create a detached run worktree and supervisor/child Sessions, edit one UTF-8 file through the candidate-bound dsh execution world, review the diff, issue a digest-bound `ChangeApproval`, apply through DevFlow, verify, and display Evidence and Decision.
+Deliver one path: open workspace, submit one-node task, create the selected isolated candidate checkout and supervisor/child Sessions, edit one UTF-8 regular file through the candidate-bound dsh execution world, freeze a Candidate Snapshot and canonical Action envelope, review the diff and verification policy, issue a logical-Action-bound `ChangeApproval`, persist the recovery key and dispatch state, revalidate canonical state, apply through DevFlow, verify, and display Evidence and Decision. The slice must prove that modifying the candidate, canonical target, workspace identity, or verification policy after approval prevents application; identical delivery retry is idempotent; an uncertain response is reconciled; and a different Action cannot reuse the approval.
 
 No bulk migration starts before this slice passes.
 
@@ -366,7 +401,7 @@ Starting with this phase, the old core is feature-frozen. It receives only sever
 
 ### Phase 3: Workspace Runtime parity
 
-Migrate manifest, detect, plan, apply, verify, project sync, lockfile, snapshot, restore, rollback, configuration, and secret-reference behavior into `workbench-runtime`. Compare new read results with the existing implementation; never dual-write mutations.
+Migrate manifest, detect, plan, apply, verify, project sync, lockfile, snapshot, restore, rollback, configuration, and secret-reference behavior into `workbench-runtime`. Classify every mutating step by resource kind and target, using DevFlow as the default owner inside the repository and Runtime outside it. Require an authenticated, plan-digest-bound `RuntimeApproval` for every mutation and invalidate it when observed state changes. Compare new read results with the existing implementation; never dual-write mutations.
 
 ### Phase 4: Governed task parity
 
@@ -386,7 +421,7 @@ Migrate one workspace at a time. Lock the selected workspace, run an import dry-
 
 ### Phase 8: Continuous dsh upgrade lane
 
-For every candidate dsh release: install, type-check, run compatibility contracts, run plugin tests, boot Web and Headless, run the governed vertical slice, validate the temporary patch if present, run legacy-data compatibility tests, and require explicit promotion. A failed release is recorded and may be skipped without widening the supported-version set.
+For every candidate dsh release: install from the frozen lockfile, verify integrity, generate the dependency inventory and license notices, scan dependencies and enforce the vulnerability policy, type-check, run compatibility contracts, run plugin tests, boot Web and Headless, run the governed vertical slice, validate the temporary patch if present, run legacy-data compatibility tests, and require explicit promotion. A failed release is recorded and may be skipped without widening the supported-version set.
 
 ### Phase 9: Resume product roadmap
 
@@ -414,13 +449,16 @@ Tests cross the same interfaces used by callers.
 1. `dsh-compat` contract tests against the exact locked dsh version.
 2. Plugin interface tests with dsh-provided test support where available.
 3. A Level 1-4 behavior-contract matrix mapping every accepted invariant to its replacement test and recorded evidence; test-count equality is not required.
-4. Execution-world tests proving Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent cannot write outside the candidate worktree.
-5. Encrypted Session Persistence tests covering confidentiality, tamper detection, retention, deletion, pinning, missing keys, and restart recovery.
-6. Distinct `ExecutionApproval` and `ChangeApproval` contract tests, including digest, expiry, actor, revision, and cross-use rejection.
-7. Web Host/Client contract, loopback, Origin/CSRF, capability-discovery, and browser smoke tests.
-8. Governed vertical-slice E2E with a real temporary Git repository and real DevFlow stable protocol.
-9. Per-workspace legacy import dry-run, locking, backup, idempotency, interrupted import, schema-marker, and forward-repair tests.
-10. Upgrade tests against the current locked version and one candidate released version.
+4. Execution-world tests proving Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent cannot write outside the candidate checkout, dereference a worktree Git administration link, or mutate canonical Git refs, index, configuration, objects, or working-tree files.
+5. Execution-mode and checkpoint tests proving failed attempts leave no changes, successful attempts advance the checkpoint, only read-only nodes on the same immutable checkpoint overlap, and undeclared nodes fail closed to mutating mode.
+6. Encrypted Session Persistence tests covering per-record nonce uniqueness, authenticated metadata, confidentiality, tamper detection, pre-persistence secret redaction, retention, deletion, pinning, installation binding, missing keys, and restart recovery.
+7. Distinct `RuntimeApproval`, `ExecutionApproval`, and `ChangeApproval` contract tests, including cross-use rejection, authenticated Web/Headless/automation actors, Runtime plan and observed-state binding, logical-Action binding, workspace and verification-policy binding, stable idempotent retry, different-Action rejection, snapshot digest, base commit, normalized path, target existence/kind/mode/digest, symlink and case-collision rejection, expiry, state revision, and candidate/canonical mutation rejection.
+8. Dispatch-outbox and correlation-event replay tests covering atomic recovery-key persistence, crashes before and after DevFlow acceptance, recovery by reserved Session identifier or idempotency key, reconciliation, projection rebuild, and immutable historical events.
+9. Storage capability tests covering workspace isolation, atomic commit, locking, schema markers, crash recovery, idempotent replay, and provider registration/replacement.
+10. Web Host/Client contract, loopback, authenticated actor, launch-credential secrecy, Origin/CSRF, capability-discovery, and browser smoke tests.
+11. Governed vertical-slice E2E with a real temporary Git repository and real DevFlow stable protocol.
+12. Per-workspace legacy import dry-run, locking, backup, idempotency, interrupted import, schema-marker, and forward-repair tests.
+13. Upgrade tests against the current locked version and one candidate released version, including frozen-lockfile, integrity, inventory, license, vulnerability-policy, exception-expiry, and emergency-build reproducibility gates.
 
 The migration gate starts from the accepted Level 4 behavior represented by the 414-test baseline. A module is removed only after every mapped behavior contract passes twice from clean checkouts and its phase acceptance document records the evidence.
 
@@ -432,6 +470,7 @@ The Workbench Profile, compatibility library, and all shipping Workbench plugins
 - Workbench Profile and plugin versions;
 - compatibility module version;
 - storage schema versions;
+- dependency inventory or SBOM identity, lockfile digest, license-notice digest, and vulnerability-scan evidence;
 - temporary patch identity, if present;
 - acceptance evidence and rollback target.
 
@@ -446,15 +485,25 @@ The architecture migration is complete when:
 - Default dsh Web and Headless profiles still start without Workbench plugins.
 - Phase 0 proves the architecture without Host-core security patches.
 - The governed vertical slice completes through dsh Agent execution and DevFlow trusted verification.
-- All Agent-visible Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent capabilities are candidate-worktree bound; the canonical workspace is not writable before DevFlow authorization.
+- All Agent-visible Filesystem, Shell, PTY, LSP, Subprocess, Agent, and Subagent capabilities are candidate-checkout bound and cannot reach shared Git administration data; the canonical working tree and Git metadata are not writable before DevFlow authorization.
+- Mutating attempts start from verified checkpoints and cannot leak failed changes into retries or later nodes. Only capability-enforced read-only nodes on the same immutable checkpoint execute concurrently; they never overlap a mutating attempt.
 - No path reports completion from dsh execution success alone.
-- Complete dsh sessions are encrypted and lifecycle-managed; governance and evaluation projections remain raw-content-free.
-- `ExecutionApproval` and `ChangeApproval` cannot substitute for one another.
+- Complete dsh sessions are encrypted per record and lifecycle-managed; secret values are removed before model exposure or persistence; governance and evaluation projections remain raw-content-free.
+- `RuntimeApproval`, `ExecutionApproval`, and `ChangeApproval` cannot substitute for one another, and every approval actor comes from a trusted authentication context.
+- Every `RuntimeApproval` binds one exact plan and observed state; a changed plan, resource target, or precondition prevents Runtime mutation.
+- Every `ChangeApproval` authorizes exactly one logical Action bound to workspace identity, verification policy, an immutable Candidate Snapshot, and canonical-state preconditions. Identical idempotent delivery may be retried, but any different Action, candidate, workspace, policy, path identity, file kind/mode, or target-state change prevents application.
+- Approval dispatch survives process failure through a durable outbox and DevFlow reconciliation; an unprovable outcome is quarantined.
+- Correlation history is append-only and its current view can be rebuilt without mutating historical events.
+- Required Storage atomicity, locking, schema-marker, recovery, and idempotency semantics pass the Phase 0 gate.
+- Required Storage semantics are available through native dsh Storage or a registered provider; otherwise migration stops.
+- Runtime and DevFlow mutation ownership is explicit, non-overlapping, and enforced for every resource and target; repository writes default to DevFlow.
 - Workspace Runtime behavior is equivalent to the accepted existing behavior.
 - Every Level 1-4 orchestration, pipeline, knowledge, and evaluation invariant is present in the behavior-contract matrix and remains covered.
 - Workbench WebUI uses plugin and Remote extension mechanisms; any remaining patch satisfies Section 4.
 - The WebUI is loopback-only until a separate authenticated remote-access design is approved.
+- Every WebUI, Headless, command, or automation approval actor comes from a trusted authentication context; mutation controls are disabled if that identity cannot be established.
 - A candidate dsh version can be evaluated without merging upstream source into this repository.
+- Production and candidate builds are reproducible from a frozen lockfile and retain dependency, license, integrity, and vulnerability evidence; the severity and expiring-exception policy gates promotion.
 - The repository contains only one Agent Loop, Session system, generic Tool Registry, and base Web server: those supplied by dsh.
 - Legacy data can be imported idempotently and remains recoverable.
 - A migrated workspace rejects older binaries after its first new-system write and supports forward repair from a recorded backup.

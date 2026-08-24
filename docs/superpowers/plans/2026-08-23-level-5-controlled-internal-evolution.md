@@ -6,7 +6,7 @@
 
 **Architecture:** `core/reflection.mjs` ranks candidate topics from trajectory rows; `core/contrast.mjs` compares best/worst trajectories within one versioned task class and extracts structured differences; `core/candidates.mjs` owns the versioned candidate rule lifecycle (proposed → evaluated → approved → promoted → rejected → rolled-back) with an append-only history; `core/candidate-benchmark.mjs` runs the paired offline benchmark and applies the promotion rule (≥5pp improvement, bootstrap 95% CI excluding zero, no security/correctness regression, cost/latency within pre-registered budget); `core/canary.mjs` enforces the ≤10% canary slice and auto-disable on regression, with rollback restoring the previous routing/workflow/meta-skill version without deleting history.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL `StateStore`, Level 4 trajectory/evaluation modules; no new dependency; bootstrap CI is a deterministic seeded re-sampling (no stats library).
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL `StateStore`, Level 4 trajectory/evaluation modules; no new dependency; bootstrap CI is a deterministic seeded re-sampling (no stats library).
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md` (Level 5) and `docs/superpowers/plans/2026-08-23-agent-workbench-level-2-to-7-execution.md` Release 5.0.
 
@@ -19,13 +19,13 @@
 - Canary slice is at most 10% of eligible runs; a regression breach disables the candidate automatically.
 - Rollback restores the previous routing/workflow/meta-skill version without deleting any history row.
 - All candidate lifecycle transitions are append-only records; no mutation of past records.
-- Every task begins with a failing test and ends with `npm test` passing (414 baseline).
+- Every task begins with a failing test and ends with`npm test` passing (414 baseline).
 
 ---
 
 ## Phase 0: Execution readiness
 
-- [ ] Run `npm test` in the worktree; expected: 414 tests, zero failures.
+- [ ] Run`npm test` in the worktree; expected: 414 tests, zero failures.
 - [ ] Create isolated worktree `workbench-l5` from main; record baseline in `docs/level-5-acceptance.md`.
 
 ---

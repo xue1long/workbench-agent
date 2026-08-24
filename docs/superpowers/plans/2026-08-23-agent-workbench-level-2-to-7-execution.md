@@ -23,7 +23,7 @@
 - Existing history is append-only. Corrections are new records that reference superseded records.
 - Any behavior-changing candidate needs a baseline, benchmark result, explicit approval, version, and rollback target.
 - Do not add a database, queue, vector store, graph database, or frontend framework before its phase gate demonstrates a measurable need.
-- Every implementation task begins with a failing test and ends with `npm test` passing.
+- Every implementation task begins with a failing test and ends with`npm test` passing.
 - A live Agent may edit only an isolated Git worktree. The trusted Workbench control plane must record explicit human approval before its Runtime adapter may submit an Action; the Agent process never receives that adapter or the governed workspace as an execution target.
 
 ---
@@ -56,12 +56,12 @@ Readiness work is staged; do not treat all implementation as one gate:
 **Allowed work by gate:**
 
 - Phase 0 Runtime compatibility fixes may start immediately in the separate DevFlow Runtime repository.
-- After the Repository gate and baseline `npm test` pass, Tasks 1–6 may be implemented and committed in an isolated Workbench worktree; they use deterministic fixtures and do not require a live provider or Runtime integration.
+- After the Repository gate and baseline`npm test` pass, Tasks 1–6 may be implemented and committed in an isolated Workbench worktree; they use deterministic fixtures and do not require a live provider or Runtime integration.
 - Tasks 7–12 may start only after Repository, Provider, and Runtime gates all pass. No live governed task or Level 2 completion claim is allowed earlier.
 
 Readiness sequence:
 
-- [ ] Run `npm test`; expected: 186 or more tests, zero failures.
+- [ ] Run`npm test`; expected: 186 or more tests, zero failures.
 - [ ] Pass the Repository gate, then run `git status --short`; record unrelated user changes and exclude them from implementation commits.
 - [ ] Pass the Provider gate with a harmless prompt that creates no changes.
 - [ ] Record the DevFlow Runtime commit/version, protocol version, and actual Python 3.11+ executable; from its checkout run `& '.\.venv\Scripts\python.exe' -m pytest -q` with zero failures. Do not assume the Windows `py` launcher exists.
@@ -281,7 +281,7 @@ For each release:
 
 1. Write the level-specific implementation plan with exact files, interfaces, failing tests, commands, and commits.
 2. Apply the staged gate: execute Tasks 1–6 after Repository readiness; execute Tasks 7–12 only after Repository, Provider, and Runtime readiness. Work one task at a time in an isolated worktree.
-3. Review behavior against the spec after every task; run focused tests and then `npm test`.
+3. Review behavior against the spec after every task; run focused tests and then`npm test`.
 4. Run the phase acceptance suite twice from clean temporary workspaces.
 5. Record test output, benchmark output, changed files, known limitations, and the go/no-go decision.
 6. Merge only after the exit gate passes; otherwise revise the same level rather than starting the next one.

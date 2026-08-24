@@ -30,7 +30,7 @@ function paper(over = {}) {
     license: 'CC-BY-4.0', terms: 'ok', retentionClass: 'keep', permission: 'granted',
     doi: '10.1234/arXiv.2501.00001',
   };
-  // Allow `null` to override (e.g. link-only sources without license).
+  // Allow`null` to override (e.g. link-only sources without license).
   for (const [k, v] of Object.entries(over)) base[k] = v;
   return base;
 }

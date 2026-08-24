@@ -122,7 +122,7 @@ function resolveManifestPath(argv, cwd = process.cwd()) {
     if (fs.existsSync(full)) return full;
   }
   throw new ManifestError(
-    `no manifest found: pass --manifest <path> or create workspace.json in ${cwd}`,
+`no manifest found: pass --manifest <path> or create workspace.json in ${cwd}`,
     { code: 'MANIFEST_NOT_FOUND', field: '--manifest' }
   );
 }

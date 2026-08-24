@@ -17,7 +17,7 @@
 - Invalid manifests never enter Apply.
 - Secrets are references only; real values never enter YAML, Git, or logs.
 - Apply stops dependent steps after failure; retry, skip, and rollback are explicit.
-- Repeated apply/restore is idempotent and produces `NO CHANGES` when already converged.
+- Repeated apply/restore is idempotent and produces`NO CHANGES` when already converged.
 - No LLM orchestration, marketplace, knowledge graph, cloud sync, or team permissions in Level 1.
 - Runtime governance target: `Intent → Action → Evidence → State → Decision`; do not claim governed execution while `dfr` is unavailable.
 
@@ -26,7 +26,7 @@
 - `workbench.mjs`: M1 manifest-to-plan CLI with a deliberately narrow YAML reader.
 - `fixtures/example-workspace.yaml`: M1 sample manifest.
 - `tests/m1_plan.test.mjs`: two Node test-runner checks.
-- Current verification: `node --test tests/m1_plan.test.mjs` passes; CLI preview produces the expected three steps.
+- Current verification:`node --test tests/m1_plan.test.mjs` passes; CLI preview produces the expected three steps.
 - Governance blocker: `dfr` is not on PATH in `D:\5-Project\20260819\devflow-runtime`; install/runtime setup is required before governed source edits there.
 
 ## Phase Gates
@@ -42,12 +42,12 @@
 ### Current State — M4 complete
 
 - 182 tests pass (`node --test tests/*.test.mjs`)
-- E2E acceptance (`tests/e2e_machine_a_to_b.test.mjs`): Machine A `workbench sync --apply` → git commit → Machine B `git clone` → `workbench restore` → `NO CHANGES` → second restore → `NO CHANGES`
+- E2E acceptance (`tests/e2e_machine_a_to_b.test.mjs`): Machine A `workbench sync --apply` → git commit → Machine B `git clone` → `workbench restore` →`NO CHANGES` → second restore →`NO CHANGES`
 - Drift recovery: lockfile refresh on second restore when manifest versions diverge from lockfile
 - Audit redaction: secret values never reach the JSONL store or the CLI
 - State persistence: `StateStore` (JSONL) at `.workbench/store/<workspaceId>/<table>.jsonl`; SQLite swap-in ready behind the same interface
 - Snapshot/Rollback: `core/snapshot.mjs` + `core/rollback.mjs`; `workbench rollback --to <snapId>`
-- Deliberate omissions kept: `node_modules/` zero runtime deps; better-sqlite3 deferred (no VS / no Node 24 prebuilt on win32-x64)
+- Deliberate omissions kept:`node_modules/` zero runtime deps; better-sqlite3 deferred (no VS / no Node 24 prebuilt on win32-x64)
 
 ---
 
@@ -67,7 +67,7 @@
 - [ ] Replace regex parsing with a real YAML/schema boundary; keep only the fields used by M1.
 - [ ] Validate `version`, `workspace.id`, and `environment.*.version`; reject unknown top-level values only if the chosen schema validator supports it cleanly.
 - [ ] Add tests for malformed YAML, missing workspace id, missing environment version, matching versions, upgrades, and missing tools.
-- [ ] Verify with `node --test tests/m1_plan.test.mjs` and a fixture CLI preview.
+- [ ] Verify with`node --test tests/m1_plan.test.mjs` and a fixture CLI preview.
 
 ### Task 2: Add explicit Core state and adapter contracts
 
@@ -182,7 +182,7 @@
 - [ ] Write `workspace.lock` only from verified applied state.
 - [ ] Snapshot managed config, MCP config, agent config, and lockfile before mutation.
 - [ ] Restore using lockfile when present, otherwise manifest; never overwrite unmanaged files.
-- [ ] Add the clean-directory restore test and repeat restore until the report is `NO CHANGES`.
+- [ ] Add the clean-directory restore test and repeat restore until the report is`NO CHANGES`.
 
 ### Task 8: Expose stable CLI commands
 

@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the accepted Workbench implementation untouched while a self-contained `spikes/dsh-compat` runner launches two exact published dsh versions from separate pnpm projects, lockfiles, module trees, and disposable homes. Node's standard library drives processes, temporary Git repositories, HTTP probes, filesystem snapshots, evidence hashing, and a small out-of-tree proof Bundle; Playwright drives the real browser surface. `0.1.0-rc.8` only creates representative legacy state, while `0.1.1-rc.2` must pass every hard gate and reopen that state before it can be selected.
 
-**Tech Stack:** Node.js 24 LTS ESM, pnpm 11.7.0, built-in `node:test`, `@playwright/test@1.62.1`, published `@deepseek-ai/dsh` and `@deepseek-ai/dsh-llm-mock-server` packages, Git CLI, existing DevFlow Runtime fixture, SHA-256 from `node:crypto`; no production dependency is added.
+**Tech Stack:** Node.js 24 LTS ESM, pnpm 11.7.0, built-in`node:test`, `@playwright/test@1.62.1`, published `@deepseek-ai/dsh` and `@deepseek-ai/dsh-llm-mock-server` packages, Git CLI, existing DevFlow Runtime fixture, SHA-256 from`node:crypto`; no production dependency is added.
 
 **Spec:** `docs/superpowers/specs/2026-08-23-dsh-core-plugin-architecture-design.md`, especially Sections 4, 7, 13-19 and Phase 0.
 
@@ -15,7 +15,7 @@
 - Freeze the approved design in its own commit before creating the isolated worktree. Every evidence file records that commit and the design-file digest.
 - Work in an isolated Git worktree created with `superpowers:using-git-worktrees`; never run the spike against the user's canonical checkout.
 - Preserve the 414-test Level 4 baseline. The spike may add tests and evidence but may not move, rewrite, or delete accepted business modules.
-- Test only exact published versions: `@deepseek-ai/dsh@0.1.0-rc.8` and `@deepseek-ai/dsh@0.1.1-rc.2`. Each gets an independent package manifest, lockfile, `node_modules`, and `DSH_HOME`; do not use aliases, `latest`, ranges, Git branches, or source checkouts.
+- Test only exact published versions: `@deepseek-ai/dsh@0.1.0-rc.8` and `@deepseek-ai/dsh@0.1.1-rc.2`. Each gets an independent package manifest, lockfile,`node_modules`, and `DSH_HOME`; do not use aliases, `latest`, ranges, Git branches, or source checkouts.
 - Use a fresh temporary `DSH_HOME` and a fresh temporary Git repository for every test. Never reuse `~/.dsh` or a developer's credentials.
 - Do not require a real model API key. Run the matching exact release of `@deepseek-ai/dsh-llm-mock-server` behind the shipping dsh model adapter; the model/network boundary is mocked while Agent Loop, Session, tools, and executors remain real.
 - No Host, Agent Loop, Session, Tool, Sandbox, Storage, or Web source patch may turn a failure into a pass.
@@ -37,7 +37,7 @@
 - Create: `spikes/dsh-compat/write-baseline.mjs`
 
 **Interfaces:**
-- Records: Git commit, Node version, pnpm version, OS, `npm test` count, and the SHA-256 digest of `package.json` before migration.
+- Records: Git commit, Node version, pnpm version, OS,`npm test` count, and the SHA-256 digest of `package.json` before migration.
 - Produces: `runBaselineSuite() -> { code, tests, pass, fail, tap, tapSha256 }`, called twice by the baseline writer.
 
 - [ ] **Step 1: Freeze the approved design revision**
@@ -122,10 +122,10 @@
 **Interfaces:**
 - Produces: `requiredProbeIds` — frozen array of every hard gate.
 - Produces: `legacyStateProbeIds` — frozen subset used only to create upgrade input state; `upgradeProbeIds` is exactly `requiredProbeIds`.
-- Produces: `normalizeProbeResult(input: ProbeResultInput) -> ProbeResult` with the exact schema below.
-- Produces: `normalizeRunManifest({ runId, version, mode, results }) -> RunManifest` with schema `workbench-dsh-run-1`, mode `legacy-state|target|upgrade`, probe results sorted by ID, and one computed manifest `evidenceDigest`.
+- Produces:`normalizeProbeResult(input: ProbeResultInput) -> ProbeResult` with the exact schema below.
+- Produces:`normalizeRunManifest({ runId, version, mode, results }) -> RunManifest` with schema `workbench-dsh-run-1`, mode `legacy-state|target|upgrade`, probe results sorted by ID, and one computed manifest `evidenceDigest`.
 - Produces: `decideVersion(results, version) -> { version, decision: 'PROMOTE'|'REJECT', failures, evidenceDigest }`.
-- Produces: `normalizeSupplyChainResult(input) -> { version, status: 'PASS'|'FAIL'|'INCONCLUSIVE', reasonClass, artifactDigests, evidenceDigest }`.
+- Produces:`normalizeSupplyChainResult(input) -> { version, status: 'PASS'|'FAIL'|'INCONCLUSIVE', reasonClass, artifactDigests, evidenceDigest }`.
 - Produces: `decideCore({ targetRuns, legacyRuns, upgradeRuns, supplyChainResults }) -> { decision: 'PROMOTE'|'HOLD'|'REJECT_DSH_CORE', selectedVersion, isolationMode, upgradeProven, failedProbeIds, reasonClass }`; each run array must contain exactly two normalized manifests and `supplyChainResults` must contain one result for each tested version.
 
 - [ ] **Step 1: Write the failing contract test**
@@ -163,7 +163,7 @@
 
 - [ ] **Step 3: Implement the minimum evidence module**
 
-  Use `node:crypto`, canonical JSON keys sorted recursively, and no dependency. Reject unknown fields and enforce this exact shape:
+  Use`node:crypto`, canonical JSON keys sorted recursively, and no dependency. Reject unknown fields and enforce this exact shape:
 
   ```js
   {
@@ -189,7 +189,7 @@
 
   Require `reasonClass === null` only for `PASS`; require a non-null reason for `FAIL` and `INCONCLUSIVE`. All three lockfile digests and artifact digests are lowercase 64-character hex, commit is lowercase 40-character hex, artifact paths are relative POSIX paths without `..`, and observation names are unique. Compute `evidenceDigest` over the normalized object rather than accepting it from input.
 
-  `normalizeRunManifest` emits this exact outer shape and computes its digest after normalizing every result:
+`normalizeRunManifest` emits this exact outer shape and computes its digest after normalizing every result:
 
   ```js
   {
@@ -204,7 +204,7 @@
 
   Tests compare the digest to an independently canonicalized SHA-256.
 
-  `normalizeSupplyChainResult` rejects unknown fields and computes its digest over `{ version, status, reasonClass, artifactDigests }`. Only `PASS` has `reasonClass: null`; `FAIL` and `INCONCLUSIVE` require the same three non-null reason classes used by probe results. `artifactDigests` must contain the seven Task 9 artifact names with lowercase SHA-256 values.
+`normalizeSupplyChainResult` rejects unknown fields and computes its digest over `{ version, status, reasonClass, artifactDigests }`. Only `PASS` has `reasonClass: null`; `FAIL` and `INCONCLUSIVE` require the same three non-null reason classes used by probe results. `artifactDigests` must contain the seven Task 9 artifact names with lowercase SHA-256 values.
 
 - [ ] **Step 4: Ignore generated runs, not fixtures**
 
@@ -359,8 +359,8 @@
 - Produces: `runCommand(file, args, { cwd, env, timeoutMs }) -> { code, stdout, stderr, timedOut }`.
 - Produces: `snapshotTree(root) -> [{ path, kind, mode, sha256 }]` without following symlinks.
 - Produces: `writeEvidenceManifest(manifest, { committedDir, runRoot }) -> { path, sha256 }`, accepting only a normalized `workbench-dsh-run-1` manifest and rejecting secrets, absolute local paths, symlinks, and artifacts outside the real run root.
-- CLI target example: `node spikes/dsh-compat/run.mjs --version 0.1.1-rc.2 --mode target --run-id target-rc2-run-1 --out .dsh-compat-runs`.
-- CLI upgrade example: `node spikes/dsh-compat/run.mjs --version 0.1.1-rc.2 --mode upgrade --source-home .dsh-compat-runs/legacy-rc8-run-1/dsh-home --run-id upgrade-run-1 --out .dsh-compat-runs`; only rc.8 accepts `legacy-state`, only rc.2 accepts `target|upgrade`, and `upgrade` requires an existing stopped source home under the run root.
+- CLI target example:`node spikes/dsh-compat/run.mjs --version 0.1.1-rc.2 --mode target --run-id target-rc2-run-1 --out .dsh-compat-runs`.
+- CLI upgrade example:`node spikes/dsh-compat/run.mjs --version 0.1.1-rc.2 --mode upgrade --source-home .dsh-compat-runs/legacy-rc8-run-1/dsh-home --run-id upgrade-run-1 --out .dsh-compat-runs`; only rc.8 accepts `legacy-state`, only rc.2 accepts `target|upgrade`, and `upgrade` requires an existing stopped source home under the run root.
 
 - [ ] **Step 1: Write failing runner tests**
 
@@ -388,7 +388,7 @@
   }).filter(([, value]) => typeof value === 'string' && value.length > 0))
   ```
 
-  Import `randomBytes` from `node:crypto`. Do not copy API keys, home-directory variables, npm tokens, the canary, or the caller's full environment. Return `canarySecret` separately to the trusted parent; Task 7 stores it through the fixture Credentials provider before dsh starts, and only the final scanner receives the in-memory value.
+  Import `randomBytes` from`node:crypto`. Do not copy API keys, home-directory variables, npm tokens, the canary, or the caller's full environment. Return `canarySecret` separately to the trusted parent; Task 7 stores it through the fixture Credentials provider before dsh starts, and only the final scanner receives the in-memory value.
 
 - [ ] **Step 4: Add fixture Git repositories**
 
@@ -438,8 +438,8 @@
 - Create: `tests/dsh-compat-composition.test.mjs`
 
 **Interfaces:**
-- Plugin uses named Cordis exports only: `name`, `inject`, `apply`; no default export.
-- `materializeFixture({ version, installRoot, runRoot }) -> { materializedDir, bundlePath, packageName, lockfilePath, lockfileSha256 }` copies the fixture into the run root, writes exact dependency versions read from package manifests resolved under `installRoot`, creates its own lockfile, and performs its own frozen install. No build or runtime command may use the source fixture directory or either candidate's `node_modules`.
+- Plugin uses named Cordis exports only:`name`, `inject`, `apply`; no default export.
+- `materializeFixture({ version, installRoot, runRoot }) -> { materializedDir, bundlePath, packageName, lockfilePath, lockfileSha256 }` copies the fixture into the run root, writes exact dependency versions read from package manifests resolved under `installRoot`, creates its own lockfile, and performs its own frozen install. No build or runtime command may use the source fixture directory or either candidate's`node_modules`.
 - Host registers one Cordis `workbenchSpike` service with `ping() -> 'pong'` and writes an activation marker through a tracked effect.
 - Bundle inserts the plugin through a dsh patch row.
 - Probe emits `profile-host-plugin`, `web-boot`, and `headless-boot` results.
@@ -452,7 +452,7 @@
   { "dsh": { "bundle": { "patch": "./cordis.patch.yml" } } }
   ```
 
-  Assert plugin source has named `name`, `inject`, and `apply` exports and no default export. Assert materialization rejects rc.8 source with rc.2 dependencies, creates `pnpm-lock.yaml` and `node_modules` only beneath `materializedDir`, and returns a lockfile digest matching the file bytes.
+  Assert plugin source has named`name`, `inject`, and `apply` exports and no default export. Assert materialization rejects rc.8 source with rc.2 dependencies, creates `pnpm-lock.yaml` and`node_modules` only beneath `materializedDir`, and returns a lockfile digest matching the file bytes.
 
 - [ ] **Step 2: Verify failure**
 
@@ -776,7 +776,7 @@
 
 - [ ] **Step 3: Implement the throwaway OS-keyring Credentials provider**
 
-  Add exact fixture dependency `@napi-rs/keyring: 1.3.0` and add `credential-provider.ts`, `session-provider.ts`, and `storage-provider.ts` to `tsconfig.host.json`; Task 4's materialized lockfile and Task 9's supply-chain gate cover the native platform package. `credential-provider.ts` uses `new Entry(service, account)` where service is `workbench-dsh-spike/<installationId>` and account is the canonical credential reference or record key. It serializes record values as canonical JSON and keeps a non-secret index record in the same OS keyring so `listRecords()` never scans files. It implements all nine public methods with the candidate-exported types, publishes itself as the sole `ctx.credentials` service, and performs no automatic fallback. Failure to replace `ctx.credentials` through the public seam is `architectural-seam`; a missing native binary, locked keyring, or unavailable OS service is `environment`. Both fail the probe and block promotion.
+  Add exact fixture dependency `@napi-rs/keyring: 1.3.0` and add `credential-provider.ts`, `session-provider.ts`, and `storage-provider.ts` to `tsconfig.host.json`; Task 4's materialized lockfile and Task 9's supply-chain gate cover the native platform package. `credential-provider.ts` uses`new Entry(service, account)` where service is `workbench-dsh-spike/<installationId>` and account is the canonical credential reference or record key. It serializes record values as canonical JSON and keeps a non-secret index record in the same OS keyring so `listRecords()` never scans files. It implements all nine public methods with the candidate-exported types, publishes itself as the sole `ctx.credentials` service, and performs no automatic fallback. Failure to replace `ctx.credentials` through the public seam is `architectural-seam`; a missing native binary, locked keyring, or unavailable OS service is `environment`. Both fail the probe and block promotion.
 
   Before dsh starts, the trusted probe parent calls `seedKeyringCredential` for `credentialRef('WORKBENCH_CANARY_SECRET')`; after launch, the dsh Host sees that value only through `ctx.credentials.resolve`. The parent also seeds `credentialKey('workbench-spike', 'session-master-v1')` with `{ kind: 'grant', payload: { keyId, keyBase64 } }`, where `keyId` is a random 128-bit lowercase hex identifier and `keyBase64` encodes 32 random bytes. On later launches, `KeyringCredentials.modifyRecord(key, current => current)` verifies and preserves the existing record rather than rotating it. Only trusted Host adapters call `resolve` or `readRecord`; no secret is placed in argv, environment variables, URLs, fixture files, dsh configuration, or evidence. The runner retains a legacy namespace until its upgrade run finishes, then calls `deleteKeyringNamespace`; target namespaces are deleted after their scans. Cleanup failure is a security probe failure.
 
@@ -915,7 +915,7 @@
 **Interfaces:**
 - `resolveAdvisoryAliases(audit) -> [{ advisoryId, aliases, osvDigest }]` resolves every GHSA through `https://api.osv.dev/v1/vulns/<GHSA>` and records all CVE aliases; an unresolved advisory makes the supply-chain result `INCONCLUSIVE`, never “not in KEV”.
 - `evaluateSupplyChain(version, artifacts) -> SupplyChainResult` returns the Task 1 input shape and may return `PASS` only after all seven artifact digests and every policy check succeed.
-- CLI: `node spikes/dsh-compat/probes/supply-chain.mjs --version 0.1.1-rc.2 --install-root spikes/dsh-compat/installs/rc2 --out docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2`; it accepts only the two planned version/root pairs and refuses an existing output file.
+- CLI:`node spikes/dsh-compat/probes/supply-chain.mjs --version 0.1.1-rc.2 --install-root spikes/dsh-compat/installs/rc2 --out docs/dsh-compatibility/evidence/supply-chain/0.1.1-rc.2`; it accepts only the two planned version/root pairs and refuses an existing output file.
 - Produces the seven named immutable artifacts per version: package inventory, lockfile/registry integrity, license inventory, npm advisory report, OSV alias resolution, CISA KEV correlation, and generated third-party notices.
 - Vulnerability decision rejects known-exploited, Critical, and applicable High findings; every accepted lower finding requires owner, rationale, and expiry.
 
@@ -942,7 +942,7 @@
 
   Repeat these commands independently under `installs/rc8` and `installs/rc2`. Extract both CVE and GHSA identifiers from the audit. Resolve each GHSA with OSV, require a stable response for every query, and union the returned CVE aliases. Fetch `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`, store retrieval time plus raw SHA-256, and join the complete CVE set against `vulnerabilities[].cveID`. Preserve the normalized OSV responses and their digests in `osv-aliases.json`; a network/parse/missing-alias failure is `INCONCLUSIVE` and blocks promotion.
 
-  Generate each `THIRD_PARTY_NOTICES.txt` deterministically from package name, exact version, SPDX expression, repository, actual included license-file name, license-file SHA-256, and license text. Reject missing or ambiguous license files instead of inventing notice text. Normalize volatile timestamps out of JSON before hashing. Write all seven artifacts with `flag: 'wx'` into the exact version directory, secret-scan them, pass their digests to `normalizeSupplyChainResult`, and commit them only in Task 10. Do not auto-create vulnerability exceptions.
+  Generate each `THIRD_PARTY_NOTICES.txt` deterministically from package name, exact version, SPDX expression, repository, actual included license-file name, license-file SHA-256, and license text. Reject missing or ambiguous license files instead of inventing notice text. Normalize volatile timestamps out of JSON before hashing. Write all seven artifacts with `flag: 'wx'` into the exact version directory, secret-scan them, pass their digests to`normalizeSupplyChainResult`, and commit them only in Task 10. Do not auto-create vulnerability exceptions.
 
 - [ ] **Step 4: Run tests and commit**
 

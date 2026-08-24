@@ -109,7 +109,7 @@ test('M4 E2E: machine A sync → git → machine B restore (NO CHANGES)', async 
   assert.ok(fs.existsSync(path.join(machineB, 'workspace.lock')));
 
   // ----- 5. machineB: workbench restore --apply -----------------------------
-  // The clean VM has no `node`/`python`/`uv` detected (FakeAdapter with
+  // The clean VM has no`node`/`python`/`uv` detected (FakeAdapter with
   // detect=null simulates "missing"). The lockfile override should kick in
   // and produce NO CHANGES.
   const cleanAdapters = new Map();

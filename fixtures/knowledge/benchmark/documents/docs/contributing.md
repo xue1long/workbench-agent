@@ -6,7 +6,7 @@ How to contribute to the workbench repository.
 
 - Open an issue before starting large changes.
 - Keep commits focused; one logical change per commit.
-- Run `npm test` before pushing.
+- Run`npm test` before pushing.
 - Update documentation in `docs/` alongside behavior changes.
 
 ## Review

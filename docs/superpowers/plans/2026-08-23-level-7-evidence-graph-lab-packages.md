@@ -6,7 +6,7 @@
 
 **Architecture:** `core/intelligence/graph.mjs` materializes a deterministic in-memory evidence graph from existing structured records (trajectory, evaluation, candidate, intelligence sources/patterns, knowledge index, packages). Edges carry `EXTRACTED | INFERRED | AMBIGUOUS` provenance. The graph backend stays in-memory until a measured threshold (`edges > 100,000` OR `path-query p95 > 500ms`) is reached, at which point a persistent backend is introduced — the Level 4 storage gate is the precedent. `core/laboratory/experiment.mjs` runs candidates in an isolated worktree against the frozen baseline (Level 5) and records environment/inputs/outputs/evidence/decision. Successful experiments return to the Level 5 approval/canary path. `core/packages-l7.mjs` extends the existing Package registry with 8 proven-asset kinds (Agent, Skill, MCP, Workflow, Knowledge Pack, Meta-Skill, Evaluator, Workspace Template) and enforces manifest, version, source, checksum, permissions, compatibility, uninstall/rollback — plus sandbox verification before a package becomes visible to a workspace.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL `StateStore`, existing change-sandbox; no new dependency. The experiment sandbox reuses `createChangeSandbox` from Level 2; the package sandbox runs an install + verifier script in a temporary worktree.
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL `StateStore`, existing change-sandbox; no new dependency. The experiment sandbox reuses `createChangeSandbox` from Level 2; the package sandbox runs an install + verifier script in a temporary worktree.
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md` (Level 7) and `docs/superpowers/plans/2026-08-23-agent-workbench-level-2-to-7-execution.md` Release 7.0.
 
@@ -18,13 +18,13 @@
 - Packages only come from local paths or git in this release; hosted marketplaces stay deferred.
 - Sandbox verification gates every install; an unverifiable or malicious package fixture is rejected before any code from it can run.
 - No new npm dependency, no database, no graph database unless the gate thresholds are reached.
-- Every task begins with a failing test and ends with `npm test` passing (474 baseline).
+- Every task begins with a failing test and ends with`npm test` passing (474 baseline).
 
 ---
 
 ## Phase 0: Execution readiness
 
-- [ ] Run `npm test` in the worktree; expected: 474 tests, zero failures.
+- [ ] Run`npm test` in the worktree; expected: 474 tests, zero failures.
 - [ ] Create isolated worktree `workbench-l7` from main; record baseline in `docs/level-7-acceptance.md`.
 
 ---
@@ -40,7 +40,7 @@
 - Produces: `buildGraph({ store }) -> Graph` — reads trajectory, evaluation, candidate/pattern, intelligence sources, knowledge rows, package rows and emits a deterministic in-memory graph of `{ nodes: [{id, kind, attrs}], edges: [{from, to, kind, provenance}] }`.
 - Produces: `queryNodes({ graph, kind, filter })` and `queryEdges({ graph, kind, provenance })` — deterministic filters.
 - Produces: `path({ graph, fromId, toId }) -> Edge[][]` — BFS/DFS path; provenance class preserved.
-- Produces: `neighborsOf({ graph, id, maxDepth = 3 }) -> { nodes, edges }` — bounded traversal with provenance-class accounting.
+- Produces:`neighborsOf({ graph, id, maxDepth = 3 }) -> { nodes, edges }` — bounded traversal with provenance-class accounting.
 - Provenance classes: `EXTRACTED` (direct mapping from a row field), `INFERRED` (derived, e.g. `candidate has evaluation reference`), `AMBIGUOUS` (multiple possible links, low confidence).
 - Storage gate harness: measure path-query p95 over 30 cold-process repetitions against a 10k-edge fixture; JSONL stays unless thresholds reached.
 

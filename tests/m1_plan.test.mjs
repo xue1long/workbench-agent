@@ -208,7 +208,7 @@ test('CLI plan prints the expected preview against the JSON fixture', async () =
 test('CLI plan prints pure INSTALL when no observed versions are injected', async () => {
   // Default observed state is empty unless env vars override. We strip the
   // known env vars defensively for this test process so the assertion is
-  // deterministic regardless of how `node --test` was invoked.
+  // deterministic regardless of how`node --test` was invoked.
   for (const k of ['WORKBENCH_NODE_VERSION', 'WORKBENCH_PYTHON_VERSION', 'WORKBENCH_UV_VERSION']) {
     delete process.env[k];
   }

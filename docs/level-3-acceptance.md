@@ -6,7 +6,7 @@
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
-| Workbench baseline | PASS | `npm test` 303/303 before Level 3 tasks |
+| Workbench baseline | PASS |`npm test` 303/303 before Level 3 tasks |
 | Level 2 exit gate | PASS | `docs/level-2-acceptance.md`; Runtime 338/338 |
 | Level 3 full suite | PASS | 378/378 (see below), run twice from clean worktrees |
 | E2E acceptance | PASS | five real repository tasks, oauth-demo link test, resume test, benchmark test (4/4 in `tests/pipeline_e2e.test.mjs`) |
@@ -44,7 +44,7 @@ Notes: every gold item is retrieved in top-5 across all six queries; 0.233 equal
 ## Acceptance Fixtures
 
 - **Five repository tasks through the standard pipeline** — `Add OAuth login`, `Add billing cycle`, `Add project sync`, `Add CLI commands`, `Add config validation` — each on a fresh temporary Git repository using the REAL change-sandbox (git worktree + `collectChangeSet`); all five finish `COMPLETED` with 6 succeeded stages, 6 persisted artifacts, and ≥1 real changed file.
-- **oauth-demo link test** — the real `fixtures/live/oauth-demo` repository runs through the standard pipeline; the Test stage executes the repository's own `node --test tests/oauth.test.mjs` in the sandbox. Result links requirements (requirement artifact hash), changed files (real sandbox diff), test output (test-report artifact + `test` evidence claim), and review evidence (review stage claims + decision SUCCEEDED).
+- **oauth-demo link test** — the real `fixtures/live/oauth-demo` repository runs through the standard pipeline; the Test stage executes the repository's own`node --test tests/oauth.test.mjs` in the sandbox. Result links requirements (requirement artifact hash), changed files (real sandbox diff), test output (test-report artifact + `test` evidence claim), and review evidence (review stage claims + decision SUCCEEDED).
 - **Interrupted execution resumes** — run 1 fails at Implementation (no Runtime call: `runtimeCalls == 0`, `stage_failed`); resume reuses every verified stage, re-runs only the failed stage, and the real source file is written exactly once.
 - **Retrieval benchmark** reports precision@5 = 0.233 and sourceCoverage = 1.0; deterministic across runs.
 - **Scope boundary** — a `src/`-scoped query never returns `docs/`/`notes/` items; pipeline stage knowledge scope is enforced twice (query scope must stay within the stage's declared scope, and `retrieve()` applies the hard boundary); a violating template fails the stage closed.

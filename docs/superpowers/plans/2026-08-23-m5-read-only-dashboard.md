@@ -6,7 +6,7 @@
 
 **Architecture:** `core/status.mjs` owns manifest loading, adapter detection, and plan assembly. `apps/web/server.mjs` is a thin HTTP adapter exposing `/api/status` and static assets; browser code only renders returned JSON.
 
-**Tech Stack:** Node.js built-ins, native HTML/CSS/JS, `node:test`; no new dependencies.
+**Tech Stack:** Node.js built-ins, native HTML/CSS/JS,`node:test`; no new dependencies.
 
 **Spec:** Approved M5 design in chat: read-only dashboard, same Core API, no adapter logic in UI, accessibility basics, one smoke test.
 
@@ -25,7 +25,7 @@
 
 ### Task 2: Read-only HTTP dashboard
 
-- [ ] Create `apps/web/server.mjs` using `node:http`.
+- [ ] Create `apps/web/server.mjs` using`node:http`.
 - [ ] Serve `/` and `/app.js` from `apps/web`.
 - [ ] Serve `GET /api/status` from `getWorkspaceStatus`.
 - [ ] Return 404 for other paths and JSON 500 errors without stack traces.
@@ -39,4 +39,4 @@
 ### Task 4: Verification
 
 - [ ] Add `tests/web.test.mjs` covering status endpoint, static asset serving, and unknown-path 404.
-- [ ] Run `node --test tests/web.test.mjs` and `npm test`.
+- [ ] Run`node --test tests/web.test.mjs` and`npm test`.

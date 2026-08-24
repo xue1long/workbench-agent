@@ -69,7 +69,7 @@ Session isolation fixture:
 
 Bounded live OAuth acceptance:
 
-- copies `fixtures/live/oauth-demo` to a fresh temp directory, runs `npm test`, and asserts the live candidate touches at most 5 UTF-8 text files.
+- copies `fixtures/live/oauth-demo` to a fresh temp directory, runs`npm test`, and asserts the live candidate touches at most 5 UTF-8 text files.
 
 ## Trust Boundary Checklist
 

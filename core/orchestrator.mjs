@@ -117,7 +117,7 @@ export class Orchestrator {
       if (typeof options.skipNode === 'function') {
         const skipped = await options.skipNode(node, ctx);
         if (skipped && skipped.skip === true) {
-          return this._finalize(node, {  
+          return this._finalize(node, {
             success: true,
             output: skipped.output ?? null,
             evidenceClaims: skipped.evidenceClaims ?? [],

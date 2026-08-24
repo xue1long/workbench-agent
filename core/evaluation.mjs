@@ -4,7 +4,7 @@
 // Raw evidence rows and derived score rows live in separate store tables so
 // scores can never silently detach from the evidence that produced them.
 // evaluate() is deterministic for a given (run, evaluator, evidence): the
-// only varying field is evaluatedAt, which can be pinned via `now` for tests.
+// only varying field is evaluatedAt, which can be pinned via`now` for tests.
 
 export class EvaluationError extends Error {
   constructor(code, message, details = null) {

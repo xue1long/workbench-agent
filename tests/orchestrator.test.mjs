@@ -273,6 +273,3 @@ test('runGraph nodeContext injects scoped knowledge into the invoker call', asyn
   assert.deepEqual(received.find((r) => r.node === 'design').knowledge.items, [{ sourcePath: 'docs/a.md' }]);
   assert.equal(received.find((r) => r.node === 'implement').knowledge, null, 'nodes without knowledge get no context');
 });
-
-
-

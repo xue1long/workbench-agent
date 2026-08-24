@@ -119,7 +119,7 @@ export async function applyPlan(plan, adapters, options = {}) {
     const adapter = adapters.get(step.resource);
     if (!adapter) {
       failed = true;
-      error = { message: `no adapter registered for resource "${step.resource}"`, code: 'APPLY_NO_ADAPTER', resource: step.resource, action: step.action };
+      error = { message:`no adapter registered for resource "${step.resource}"`, code: 'APPLY_NO_ADAPTER', resource: step.resource, action: step.action };
       const noAdapterRecord = {
         resource: step.resource,
         action: step.action,

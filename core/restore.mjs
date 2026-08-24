@@ -4,14 +4,14 @@
 // Spec §34 / §22:
 //   * Machine A `workbench sync` -> writes lockfile + commits to git
 //   * Machine B clean VM: `workbench restore` -> reads manifest, applies,
-//     verifies, repeat until `NO CHANGES`
+//     verifies, repeat until`NO CHANGES`
 //
 // M4 behavior:
 //   * Plan derives from the manifest + observed state (probes host).
 //   * If a lockfile is present, every applied step's `before` is replaced
 //     with the locked version when observed is missing/null — so a clean
 //     VM correctly plans SKIP for already-pinned resources.
-//   * After apply, `noChanges` is true when summary.applied === 0.
+//   * After apply,`noChanges` is true when summary.applied === 0.
 //   * `restoreWorkspace` writes back a refreshed lockfile when desired
 //     versions diverge from the lockfile (defensive drift correction).
 

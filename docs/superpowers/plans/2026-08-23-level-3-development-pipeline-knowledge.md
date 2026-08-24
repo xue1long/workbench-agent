@@ -6,7 +6,7 @@
 
 **Architecture:** Pipeline templates are immutable, validated descriptions of stages; `compilePipeline` turns them into ordinary Level 2 `TaskGraph` nodes so all Level 2 trust boundaries (routing, sandbox, Runtime Action Gateway, trusted Evidence, `finish` Decision) apply unchanged. Artifact content lives in files under `.workbench/pipelines/<pipelineId>/artifacts/`; JSONL rows persist only metadata plus sha256 digests. Knowledge ingestion stores content-addressed files under `.workbench/knowledge/objects/` with an append-only JSONL index; retrieval is deterministic path/keyword scoring with a hard scope boundary and a fixed context budget. Durable project memory accepts only reviewed decisions and verifier-backed evidence, never raw `EvidenceClaim`s.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL `StateStore`, existing `executeWorkflow`/`Orchestrator` boundaries; no new Node runtime dependency, no vector store, no database. The Runtime path (when live) reuses the Level 2 `DevflowRuntimeAdapter` through the extracted `Orchestrator.runGraph`.
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL `StateStore`, existing `executeWorkflow`/`Orchestrator` boundaries; no new Node runtime dependency, no vector store, no database. The Runtime path (when live) reuses the Level 2 `DevflowRuntimeAdapter` through the extracted `Orchestrator.runGraph`.
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md` (Level 3 section) and `docs/superpowers/plans/2026-08-23-agent-workbench-level-2-to-7-execution.md` Release 3.0.
 
@@ -22,7 +22,7 @@
 - Retrieval never crosses its declared scope: an item whose `scope` is outside the query scope is excluded programmatically, and the response cites exact source paths.
 - Durable project memory stores only reviewed decisions and verified artifacts (verifier-versioned Evidence). Unverified Agent claims are rejected and never written to memory.
 - No new npm dependency, no database, no vector store, no graph database, no frontend framework.
-- Every implementation task begins with a failing test and ends with `npm test` passing (303 baseline).
+- Every implementation task begins with a failing test and ends with`npm test` passing (303 baseline).
 - The live governed path (optional acceptance) requires the Repository, Provider, and Runtime gates that already passed in Level 2; runtime.yaml stays `enabled: false` by default.
 
 ---
@@ -31,7 +31,7 @@
 
 Current observation: Level 2 passed its exit gate (303 Workbench tests, DevFlow Runtime 338/338, live CLI field acceptance on the real devflow-runtime process). Level 3 may start.
 
-- [ ] Run `npm test` in the worktree; expected: 303 tests, zero failures.
+- [ ] Run`npm test` in the worktree; expected: 303 tests, zero failures.
 - [ ] Record the worktree branch, baseline commit, Node version, and test count in `docs/level-3-acceptance.md`.
 - [ ] Confirm `git status --short` in the worktree is clean before Task 1.
 - [ ] Reuse `fixtures/live/oauth-demo` as the offline repository fixture for the five-task acceptance; no network or credentials required.
@@ -72,7 +72,7 @@ Task 1 covers: valid construction; deep-freeze (mutations throw in strict mode);
 - [ ] **Step 1: Write failing contract tests** (`tests/pipeline.test.mjs`)
 - [ ] **Step 2: Verify the tests fail** (`node --test tests/pipeline.test.mjs`)
 - [ ] **Step 3: Implement `core/pipeline.mjs`** — pure validation + compile; reuse `createTaskGraph`/`canonicalJson` from `core/task-graph.mjs`
-- [ ] **Step 4: Verify focused and full suites** (focused then `npm test`, 303 + new all green)
+- [ ] **Step 4: Verify focused and full suites** (focused then`npm test`, 303 + new all green)
 - [ ] **Step 5: Commit** `feat: add immutable pipeline template contract`
 
 ### Task 2: Ship the standard development pipeline template
@@ -289,7 +289,7 @@ Retention policy is enforced before ingestion completes for a user-specified sco
 - [ ] Retrieval is deterministic, scope-hard-bound, budget-bounded, and cites source paths.
 - [ ] The fixed retrieval benchmark reports precision@5 and source coverage; semantic retrieval remains a recorded deferral until it wins by ≥15 points.
 - [ ] Durable project memory stores only reviewed decisions and verifier-backed evidence.
-- [ ] Level 3 acceptance fixtures pass twice; `npm test` stays green; the exit gate and stop line are recorded in `docs/level-3-acceptance.md`.
+- [ ] Level 3 acceptance fixtures pass twice;`npm test` stays green; the exit gate and stop line are recorded in `docs/level-3-acceptance.md`.
 
 ## Deliberate Deferrals
 

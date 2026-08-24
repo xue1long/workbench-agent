@@ -50,28 +50,28 @@ function sha256Hex(value) {
 
 function validateAcceptanceCriteria(node) {
   if (!Array.isArray(node.acceptanceCriteria) || node.acceptanceCriteria.length === 0) {
-    throw new TaskGraphError('TASK_NODE_NO_ACCEPTANCE', `node ${node.id} must declare at least one acceptance criterion`);
+    throw new TaskGraphError('TASK_NODE_NO_ACCEPTANCE',`node ${node.id} must declare at least one acceptance criterion`);
   }
   const seen = new Set();
   for (const acc of node.acceptanceCriteria) {
     if (!acc || typeof acc !== 'object') {
-      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID', `node ${node.id} has non-object acceptance criterion`);
+      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID',`node ${node.id} has non-object acceptance criterion`);
     }
     const { id, verifierRef, required } = acc;
     if (typeof id !== 'string' || !id.trim()) {
-      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID', `node ${node.id} acceptance criterion missing id`);
+      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID',`node ${node.id} acceptance criterion missing id`);
     }
     if (seen.has(id)) {
-      throw new TaskGraphError('TASK_NODE_DUPLICATE_ACCEPTANCE', `node ${node.id} has duplicate acceptance id ${id}`);
+      throw new TaskGraphError('TASK_NODE_DUPLICATE_ACCEPTANCE',`node ${node.id} has duplicate acceptance id ${id}`);
     }
     seen.add(id);
     if (typeof verifierRef !== 'string' || !ACCEPTANCE_VERIFIER_SET.has(verifierRef)) {
-      throw new TaskGraphError('TASK_NODE_VERIFIER_REF_INVALID', `node ${node.id} acceptance ${id} uses unknown verifier ${JSON.stringify(verifierRef)}`, {
+      throw new TaskGraphError('TASK_NODE_VERIFIER_REF_INVALID',`node ${node.id} acceptance ${id} uses unknown verifier ${JSON.stringify(verifierRef)}`, {
         accepted: [...ACCEPTANCE_VERIFIER_SET],
       });
     }
     if (typeof required !== 'boolean') {
-      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID', `node ${node.id} acceptance ${id} must declare required as boolean`);
+      throw new TaskGraphError('TASK_NODE_ACCEPTANCE_INVALID',`node ${node.id} acceptance ${id} must declare required as boolean`);
     }
   }
 }
@@ -129,28 +129,28 @@ function validateNode(node, ids) {
     throw new TaskGraphError('TASK_NODE_ID_INVALID', 'node id must be a non-empty string');
   }
   if (typeof goal !== 'string' || !goal.trim()) {
-    throw new TaskGraphError('TASK_NODE_GOAL_EMPTY', `node ${id} must declare a non-empty goal`);
+    throw new TaskGraphError('TASK_NODE_GOAL_EMPTY',`node ${id} must declare a non-empty goal`);
   }
   if (ids.has(id)) {
     throw new TaskGraphError('TASK_GRAPH_DUPLICATE_NODE', `duplicate node id ${id}`);
   }
   ids.add(id);
   if (!Array.isArray(dependencies)) {
-    throw new TaskGraphError('TASK_NODE_DEPENDENCIES_INVALID', `node ${id} dependencies must be an array`);
+    throw new TaskGraphError('TASK_NODE_DEPENDENCIES_INVALID',`node ${id} dependencies must be an array`);
   }
   if (dependencies.includes(id)) {
-    throw new TaskGraphError('TASK_GRAPH_SELF_DEPENDENCY', `node ${id} cannot depend on itself`);
+    throw new TaskGraphError('TASK_GRAPH_SELF_DEPENDENCY',`node ${id} cannot depend on itself`);
   }
   for (const dep of dependencies) {
     if (typeof dep !== 'string' || !dep.trim()) {
-      throw new TaskGraphError('TASK_NODE_DEPENDENCY_INVALID', `node ${id} has invalid dependency ${JSON.stringify(dep)}`);
+      throw new TaskGraphError('TASK_NODE_DEPENDENCY_INVALID',`node ${id} has invalid dependency ${JSON.stringify(dep)}`);
     }
   }
   if (maxAttempts !== undefined && (typeof maxAttempts !== 'number' || maxAttempts < 1 || !Number.isInteger(maxAttempts))) {
-    throw new TaskGraphError('TASK_NODE_MAX_ATTEMPTS_INVALID', `node ${id} maxAttempts must be a positive integer`);
+    throw new TaskGraphError('TASK_NODE_MAX_ATTEMPTS_INVALID',`node ${id} maxAttempts must be a positive integer`);
   }
   if (maxReviewRounds !== undefined && (typeof maxReviewRounds !== 'number' || maxReviewRounds < 0 || !Number.isInteger(maxReviewRounds))) {
-    throw new TaskGraphError('TASK_NODE_MAX_REVIEW_ROUNDS_INVALID', `node ${id} maxReviewRounds must be a non-negative integer`);
+    throw new TaskGraphError('TASK_NODE_MAX_REVIEW_ROUNDS_INVALID',`node ${id} maxReviewRounds must be a non-negative integer`);
   }
   validateAcceptanceCriteria(node);
 
@@ -203,7 +203,7 @@ export function createTaskGraph({ task, nodes }) {
   for (const node of validated) {
     for (const dep of node.dependencies) {
       if (!ids.has(dep)) {
-        throw new TaskGraphError('TASK_GRAPH_MISSING_DEPENDENCY', `node ${node.id} depends on unknown node ${dep}`);
+        throw new TaskGraphError('TASK_GRAPH_MISSING_DEPENDENCY',`node ${node.id} depends on unknown node ${dep}`);
       }
     }
   }

@@ -82,7 +82,7 @@ export async function executeWorkflow(graph, runNode, options = {}) {
     const prev = stateEntries.get(node.id);
     const next = { ...prev, ...patch };
     if (!NODE_STATUSES.has(next.status)) {
-      throw new WorkflowRuntimeError('WORKFLOW_NODE_STATUS_INVALID', `node ${node.id} produced unknown status ${next.status}`);
+      throw new WorkflowRuntimeError('WORKFLOW_NODE_STATUS_INVALID',`node ${node.id} produced unknown status ${next.status}`);
     }
     stateEntries.set(node.id, Object.freeze(next));
   }

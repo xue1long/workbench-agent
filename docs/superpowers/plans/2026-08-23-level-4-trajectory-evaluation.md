@@ -6,7 +6,7 @@
 
 **Architecture:** `core/trajectory.mjs` assembles a versioned read-model projection from Level 2/3 run reports (append-only JSONL rows; no second source of truth — DevFlow EventStore remains authoritative for governed facts). `core/evaluation.mjs` defines the `evaluate(run, evaluator)` boundary: each evaluator declares `id`, `version`, `kind` (rule | test | static-analysis | human-feedback | llm-judge) and a deterministic function. Raw evidence rows and derived score rows are separate tables so scores can never silently detach from their evidence. LLM-judge scores are reported in their own field and can never override failed tests or security checks. Benchmark suites freeze fixtures; the frozen baseline is ≥50 representative task cases with recorded scores.
 
-**Tech Stack:** Node.js 20+ ESM, built-in `node:test`, existing JSONL `StateStore`, existing L2/L3 core modules; no new npm dependency, no database (JSONL stays unless the storage decision gate measures a need).
+**Tech Stack:** Node.js 20+ ESM, built-in`node:test`, existing JSONL `StateStore`, existing L2/L3 core modules; no new npm dependency, no database (JSONL stays unless the storage decision gate measures a need).
 
 **Spec:** `C:\Users\HP\OneDrive\007 - 个人笔记\000 Inbox\2026-08-23 Agent Workbench — Level 2 至 Level 7 实施方案.md` (Level 4) and `docs/superpowers/plans/2026-08-23-agent-workbench-level-2-to-7-execution.md` Release 4.0.
 
@@ -20,13 +20,13 @@
 - Benchmark fixtures freeze before any promotion decision; drift requires a version change.
 - No database/queue/vector store unless the storage decision gate measures 100k projected events or dashboard query p95 > 200 ms (measured over 30 cold-process repetitions, recorded with the machine profile).
 - Existing CLI, manifest, and dashboard behavior stays compatible; additions are additive.
-- Every task begins with a failing test and ends with `npm test` passing (378 baseline).
+- Every task begins with a failing test and ends with`npm test` passing (378 baseline).
 
 ---
 
 ## Phase 0: Execution readiness
 
-- [ ] Run `npm test` in the worktree; expected: 378 tests, zero failures.
+- [ ] Run`npm test` in the worktree; expected: 378 tests, zero failures.
 - [ ] Create isolated worktree `workbench-l4` from main; record baseline in `docs/level-4-acceptance.md`.
 
 ---
@@ -42,7 +42,7 @@
 - Produces: `recordRun({ run, projectionVersion = '1.0.0' }) -> TrajectoryRow` — normalizes a Level 2/3 run report (orchestrator report or pipeline report) into a row: `{ runId, taskId, workflowId (pipelineId or 'task'), templateVersion, executionStatus, finalStatus, failureClass, agentIds, cost, latencyMs, startedAt, finishedAt, artifactHashes, evidenceRefs, projectionVersion }`.
 - Produces: `queryTrajectory({ rows, agent, workflow, status, failureClass, minCost, maxCost, maxLatencyMs }) -> TrajectoryRow[]` — deterministic filter (the same query the dashboard uses).
 - Produces: `trajectorySummary(rows) -> { total, successRate, avgCostUsd, avgLatencyMs, failureDistribution, byAgent, byWorkflow }`.
-- Failure class derivation is deterministic: `failed-dependency`, `budget`, `deadline`, `no-candidate`, `approval`, `stage-failed`, `quarantined`, `evaluator-reject` or `none`.
+- Failure class derivation is deterministic: `failed-dependency`, `budget`, `deadline`,`no-candidate`, `approval`, `stage-failed`, `quarantined`, `evaluator-reject` or`none`.
 
 - [ ] **Step 1: Write failing tests** (normalization of pipeline report + orchestrator report; failureClass mapping; filters; summary aggregates; versioned rows)
 - [ ] **Step 2: Verify failure**

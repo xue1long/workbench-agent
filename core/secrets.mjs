@@ -18,7 +18,7 @@ export class SecretError extends Error {
     this.code = options.code ?? 'SECRET_ERROR';
     // Preserve the error class for stack traces; `options.name` would
     // overwrite the constructor-set `Error.name` (the previous code did
-    // exactly this and ended up with `name === null` when no override).
+    // exactly this and ended up with`name === null` when no override).
     this.name = options.name ?? 'SecretError';
   }
 }
@@ -36,7 +36,7 @@ function assertName(name) {
 
 /**
  * Normalize a manifest-side reference. Either the raw `{ secret: NAME }`
- * shape, or a bare string `NAME`, is accepted and reduced to a plain
+ * shape, or a bare string`NAME`, is accepted and reduced to a plain
  * `{ secret: NAME }` reference object.
  */
 export function normalizeSecretReference(ref) {
