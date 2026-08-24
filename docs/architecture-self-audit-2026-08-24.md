@@ -273,3 +273,41 @@ boundary. Gap 3 lives in `graphify`, not here.
   initial `npm test` and `npm run ci` runs missed. The runtime did not
   catch it directly — running `npm run verify` did. But the review
   session was the trigger for me to run the full gate suite.
+
+---
+
+## Post-audit event: GitHub-hosted runner image change (2026-08-24)
+
+After the audit doc was pushed, all six CI runs started failing at
+the `setup-node@v4` step before any code ran:
+
+> Node 20 is being deprecated. This workflow is running with Node 24
+> by default. If you need to temporarily use Node 20, you can set the
+> `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true` environment variable.
+> Error: Caching for 'none' is not supported
+
+Two compounding problems:
+1. **Node 20 deprecated on GitHub Actions hosted runners** on
+   2025-09-19. `setup-node@v4` can no longer provision Node 20. Our
+   matrix `[20, 22, 24]` made every Node 20 job fail at provision time
+   (≈13s runtime, no code ran).
+2. **`cache: 'none'` is invalid input for `setup-node@v4`**
+   ([PR #917](https://github.com/actions/setup-node/pull/917)). setup-node
+   now explicitly rejects the literal string `none` with
+   `Error: Caching for 'none' is not supported`.
+
+Fix (commit `6ab816f`):
+- Matrix drops Node 20; keeps `[22, 24]`. `package.json` still
+  declares `"engines": { "node": ">=20" }` so local Node 20 keeps working;
+  CI does not block on the deprecated runner image.
+- `cache: 'none'` removed from the `setup-node@v4` `with:` block. Omitting
+  the field means "no cache", which is fine because `package.json` has
+  no npm deps (zero-deps policy).
+
+This is the second time a review pass caught something I missed in
+local checks: first the trailing newline, now the runner-image
+deprecation. The lesson for future audits: **the local `npm run ci`
+fast loop is not equivalent to the full CI workflow** — external changes
+(deprecation, cache validation, runner-image availability) only show
+up in the remote runner. The self-audit doc is now an honest living
+record; update it when the next external change lands.
