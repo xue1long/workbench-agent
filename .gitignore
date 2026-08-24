@@ -48,3 +48,6 @@ logs/
 
 # gitconfig / githooks (local-only; checked-in .githooks is a directory)
 .gitconfig.local
+
+# Graphify knowledge-graph artifacts (local tooling output, not source)
+graphify-out/
