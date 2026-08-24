@@ -1,0 +1,583 @@
+From 27f222b55b348edfe977818f5af7eba744b1c93a Mon Sep 17 00:00:00 2001
+From: Workbench-Agent <workbench-agent@local>
+Date: Sun, 23 Aug 2026 18:47:13 +0800
+Subject: [PATCH 1/2] fix(tests): derive authorization timestamps from current
+ UTC clock
+
+The stale fixed-clock fixtures in test_effect_gateway.py, test_operations.py
+and test_final_gate.py hard-coded 2026-08-21 12:00 UTC, which causes every
+human-authorization test to fail when run later because the current wall
+clock is no longer inside [approved_at, expires_at].
+
+Derive _utc() from datetime.now(timezone.utc) so the positive fixtures stay
+valid indefinitely. The explicit expired-authorization fixture in
+test_effect_gateway.py still passes hours_valid=-1 to keep the negative
+behavior intact.
+
+Phase 0 Runtime gate step: 43/43 focused tests pass; full pytest 333/333
+pass with no other modifications.
+---
+ tests/integration/test_final_gate.py | 5 ++++-
+ tests/test_effect_gateway.py         | 6 +++++-
+ tests/test_operations.py             | 5 ++++-
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/tests/integration/test_final_gate.py b/tests/integration/test_final_gate.py
+index 36d3633..495e4c2 100644
+--- a/tests/integration/test_final_gate.py
++++ b/tests/integration/test_final_gate.py
+@@ -89,7 +89,10 @@ SAMPLES = ROOT / "config"
+ 
+ 
+ def _utc() -> _dt.datetime:
+-    return _dt.datetime(2026, 8, 21, 12, 0, tzinfo=_dt.timezone.utc)
++    # Derive the authorization timestamp from the current UTC clock so the
++    # fixed fixtures stay valid regardless of when the test is run. Explicit
++    # expired-authorization fixtures elsewhere still use a negative offset.
++    return _dt.datetime.now(_dt.timezone.utc)
+ 
+ 
+ def make_intent(*acceptances: Acceptance) -> IntentDocument:
+diff --git a/tests/test_effect_gateway.py b/tests/test_effect_gateway.py
+index 827ceee..20432aa 100644
+--- a/tests/test_effect_gateway.py
++++ b/tests/test_effect_gateway.py
+@@ -31,7 +31,11 @@ from devflow_runtime.persistence.event_store import EventStore
+ 
+ 
+ def _utc() -> _dt.datetime:
+-    return _dt.datetime(2026, 8, 21, 12, 0, tzinfo=_dt.timezone.utc)
++    # Derive the authorization timestamp from the current UTC clock so the
++    # fixed fixtures stay valid regardless of when the test is run. The
++    # explicit ``test_expired_authorization_rejected`` case still uses a
++    # negative offset to guarantee an expired authorization.
++    return _dt.datetime.now(_dt.timezone.utc)
+ 
+ 
+ def make_request(
+diff --git a/tests/test_operations.py b/tests/test_operations.py
+index 205e9c7..6a5543a 100644
+--- a/tests/test_operations.py
++++ b/tests/test_operations.py
+@@ -16,7 +16,10 @@ from devflow_runtime.persistence.event_store import EventStore
+ 
+ 
+ def _utc() -> _dt.datetime:
+-    return _dt.datetime(2026, 8, 21, 12, 0, tzinfo=_dt.timezone.utc)
++    # Derive the authorization timestamp from the current UTC clock so the
++    # fixed fixtures stay valid regardless of when the test is run. Explicit
++    # expired-authorization fixtures elsewhere still use a negative offset.
++    return _dt.datetime.now(_dt.timezone.utc)
+ 
+ 
+ def make_request(kind: str, effect_id: str = "eff-1", auth_id: str = "") -> EffectRequest:
+-- 
+2.53.0.windows.2
+
+
+From 01531ca0efae465cf33126b0889acd734e83e254 Mon Sep 17 00:00:00 2001
+From: Workbench-Agent <workbench-agent@local>
+Date: Sun, 23 Aug 2026 18:55:14 +0800
+Subject: [PATCH 2/2] fix(runtime): isolate consecutive sessions, plumb
+ test_command
+
+Phase 0 Runtime compatibility fixes for Agent Workbench Level 2:
+
+- Filter event selection on aggregate_id == session_id in RuntimeKernel
+  observe/status/recover and in ActionGateway.request_action so two
+  consecutive sessions in one workspace never share Intent, revision,
+  Evidence, blocking reasons or terminal decision.
+- Extend protocol/cli::load_config to accept test_command (and
+  dependency_command) as a literal string array, validate the shape,
+  and forward it into RuntimeKernel so the configured command becomes
+  part of the trusted evidence chain for any required test acceptance.
+- Add tests/test_two_session_isolation.py covering Session A -> B
+  isolation on every observation boundary (observe/status/recover) and
+  in both directions.
+- Add tests/test_test_command_evidence.py proving that a configured
+  test command which exits 0 produces trusted test evidence and a
+  finish Decision, while a non-zero exit halts the session and records
+  untrusted evidence plus an action_rejected event.
+
+Focused tests: 43 + 3 + 2 = 48 pass. Full pytest: 338/338 pass. No
+user-owned modifications touched.
+---
+ src/devflow_runtime/protocol/cli.py           |  49 ++++++-
+ src/devflow_runtime/runtime/action_gateway.py |  34 +++--
+ src/devflow_runtime/runtime/kernel.py         |  18 ++-
+ tests/test_test_command_evidence.py           | 113 ++++++++++++++++
+ tests/test_two_session_isolation.py           | 123 ++++++++++++++++++
+ 5 files changed, 323 insertions(+), 14 deletions(-)
+ create mode 100644 tests/test_test_command_evidence.py
+ create mode 100644 tests/test_two_session_isolation.py
+
+diff --git a/src/devflow_runtime/protocol/cli.py b/src/devflow_runtime/protocol/cli.py
+index b9217d8..e9153a1 100644
+--- a/src/devflow_runtime/protocol/cli.py
++++ b/src/devflow_runtime/protocol/cli.py
+@@ -37,11 +37,54 @@ DATA_DIR = ".devflow-runtime"
+ 
+ 
+ def load_config(workspace: pathlib.Path) -> dict[str, object]:
++    """Load ``config/runtime.yaml``.
++
++    Recognized keys:
++
++    - ``enabled`` (bool, default ``False``): enable Runtime execution for the
++      workspace. Commands ``run`` and ``recover`` refuse unless this is true.
++    - ``test_command`` (list of strings, optional): literal argv passed to
++      ``RuntimeKernel`` so the configured test command becomes part of the
++      trusted evidence chain for any required ``test`` acceptance.
++    - ``dependency_command`` (list of strings, optional): same shape as
++      ``test_command`` for dependency acceptance evidence.
++
++    The parser only accepts string lists (no shell interpolation). Unknown
++    keys are ignored to stay compatible with future fields.
++    """
+     cfg = workspace / CONFIG_REL
+     if not cfg.exists():
+         return {"enabled": False}
+     data = parse_yaml_mini(cfg.read_text(encoding="utf-8"))
+-    return {"enabled": bool(data.get("enabled", False))}
++    out: dict[str, object] = {"enabled": bool(data.get("enabled", False))}
++    test_command = _read_string_list(data, "test_command")
++    dependency_command = _read_string_list(data, "dependency_command")
++    if test_command is not None:
++        out["test_command"] = test_command
++    if dependency_command is not None:
++        out["dependency_command"] = dependency_command
++    return out
++
++
++def _read_string_list(data: dict[str, object], key: str) -> list[str] | None:
++    """Return ``data[key]`` as a list of non-empty strings, or ``None``."""
++    raw = data.get(key)
++    if raw is None:
++        return None
++    if isinstance(raw, str):
++        return [raw] if raw.strip() else None
++    if isinstance(raw, list) and all(isinstance(item, str) and item for item in raw):
++        return list(raw)
++    raise ValueError(f"{key} must be a string or a list of non-empty strings")
++
++
++def _coerce_command(value: object) -> list[str] | None:
++    """Coerce a parsed config value into the literal argv list Kernel expects."""
++    if value is None:
++        return None
++    if isinstance(value, list) and all(isinstance(item, str) and item for item in value):
++        return list(value)
++    raise ValueError("command must be a list of non-empty strings")
+ 
+ 
+ def integrity_payload(workspace: pathlib.Path) -> dict[str, object]:
+@@ -116,6 +159,8 @@ def cmd_run(
+     kernel = RuntimeKernel(
+         workspace_root=str(workspace),
+         event_store_dir=str(workspace / DATA_DIR),
++        test_command=_coerce_command(config.get("test_command")),
++        dependency_command=_coerce_command(config.get("dependency_command")),
+     )
+     if session_id:
+         session = kernel.observe(session_id).session
+@@ -155,6 +200,8 @@ def cmd_recover(workspace: pathlib.Path, session_id: str) -> int:
+     kernel = RuntimeKernel(
+         workspace_root=str(workspace),
+         event_store_dir=str(workspace / DATA_DIR),
++        test_command=_coerce_command(config.get("test_command")),
++        dependency_command=_coerce_command(config.get("dependency_command")),
+     )
+     recovery = kernel.recover(session_id)
+     try:
+diff --git a/src/devflow_runtime/runtime/action_gateway.py b/src/devflow_runtime/runtime/action_gateway.py
+index 929de79..32796d4 100644
+--- a/src/devflow_runtime/runtime/action_gateway.py
++++ b/src/devflow_runtime/runtime/action_gateway.py
+@@ -161,13 +161,19 @@ class ActionGateway:
+ 
+     def request_action(self, session_id: str, action: Action) -> ActionResultL1:
+         try:
+-            events = self._store.read_all()
++            all_events = self._store.read_all()
+         except EventStoreError as exc:
+             return self._result(action, "quarantined", [], self._halt("event store corruption", action), 0, str(exc))
+ 
++        # Phase 0 Runtime gate: two consecutive sessions in one workspace must
++        # never share authorization state, intent content, evidence, blocking
++        # reasons or terminal decisions. Filter the event stream to this
++        # session's aggregate_id before reducing, so Session B does not see
++        # Session A's revisions or evidence.
++        events = [event for event in all_events if event.aggregate_id == session_id]
+         reducer = Reducer()
+         state = reducer.reduce(events)
+-        if not any(e.event_type == EVENT_SESSION_STARTED and e.aggregate_id == session_id for e in events):
++        if not any(e.event_type == EVENT_SESSION_STARTED and e.aggregate_id == session_id for e in all_events):
+             return self._result(action, "rejected", [], self._halt("unknown session", action), state.revision)
+ 
+         # 1. authorize
+@@ -189,8 +195,9 @@ class ActionGateway:
+ 
+         # 3. staged execution (prepare never touches the real workspace)
+         self._journal.record(action.id, "prepared")
++        is_multi = len(action.target_paths) > 1 or "multi_file" in action.payload
+         try:
+-            change = self._staged.prepare(action)
++            change = self._staged.prepare_many(action) if is_multi else self._staged.prepare(action)
+         except (PathOutOfScope, ValueError) as exc:
+             self._journal.record(action.id, "aborted", str(exc))
+             self._append_event(session_id, EVENT_ACTION_REJECTED, {"action_id": action.id, "reason": str(exc)}, state.revision, action)
+@@ -201,13 +208,13 @@ class ActionGateway:
+             return self._result(action, "quarantined", [], self._halt(f"execution interrupted: {exc}", action), state.revision, str(exc))
+ 
+         self._journal.record(action.id, "applied")
+-        change = self._staged.apply(change)
++        change = self._staged.apply_many(change) if is_multi else self._staged.apply(change)
+         if change.status == "aborted":
+             self._journal.record(action.id, "aborted", "baseline digest mismatch")
+             self._append_event(session_id, EVENT_ACTION_REJECTED, {"action_id": action.id, "reason": "baseline digest mismatch"}, state.revision, action)
+             return self._result(action, "rejected", [], self._halt("baseline digest mismatch", action), state.revision)
+ 
+-        change = self._staged.commit(change)
++        change = self._staged.commit_many(change) if is_multi else self._staged.commit(change)
+         if change.status == "quarantined":
+             self._journal.record(action.id, "quarantined", "cannot confirm promotion")
+             return self._result(action, "quarantined", [], self._halt("workspace state uncertain", action), state.revision, "cannot confirm promotion")
+@@ -215,14 +222,14 @@ class ActionGateway:
+ 
+         # 4. action_applied event + Action Evidence
+         rev = self._next_revision(events)
+-        self._append_event(session_id, EVENT_ACTION_APPLIED, {"action_id": action.id, "target_paths": [change.target_path]}, rev, action)
++        self._append_event(session_id, EVENT_ACTION_APPLIED, {"action_id": action.id, "target_paths": action.target_paths}, rev, action)
+         action_evidence = Evidence(
+             id=f"evidence-{uuid.uuid4().hex[:12]}",
+             claim_id=f"claim-{uuid.uuid4().hex[:12]}",
+             action_id=action.id,
+             kind="diff",
+             payload={
+-                "target_path": change.target_path,
++                **({"target_paths": action.target_paths} if is_multi else {"target_path": change.target_path}),
+                 "diff": change.diff,
+                 "digest_before": change.digest_before,
+                 "digest_after": change.digest_after,
+@@ -305,15 +312,20 @@ class ActionGateway:
+         # 6.5 rollback on verification failure: restore the original file so a
+         # rejected action never leaves the workspace in a modified state.
+         if blocking:
+-            rolled = self._staged.rollback(change)
++            rolled = self._staged.rollback_many(change) if is_multi else self._staged.rollback(change)
+             if rolled.status == "quarantined":
+                 # rollback itself failed -> uncertain state, must quarantine
+                 halt = self._halt("rollback failed, workspace state uncertain", action)
+                 return self._result(action, "quarantined", evidence_ids, halt, state.revision, "cannot confirm rollback")
+             self._journal.record(action.id, "rolled_back")
+ 
+-        # 7. rebuild state from all events and decide
+-        events2 = self._store.read_all()
++        # 7. rebuild state from session-scoped events and decide.
++        # State, intent and trusted evidence are all filtered to this session
++        # so two sessions never share governance decisions. Re-read from the
++        # store to pick up the verifier / rejection events appended in #6
++        # above, which are not present in the cached ``all_events`` snapshot.
++        latest = self._store.read_all()
++        events2 = [event for event in latest if event.aggregate_id == session_id]
+         state2 = reducer.reduce(events2)
+         intent = reducer.reduce_intent(events2)
+         trusted = reducer.reduce_trusted_evidence(events2)
+@@ -324,7 +336,7 @@ class ActionGateway:
+         if decision.kind == "finish":
+             self._append_event(session_id, EVENT_SESSION_FINISHED, {}, rev, action)
+             # Clean up backup files so AuditVerifier's staging_cleanup check passes
+-            self._staged.cleanup(change)
++            self._staged.cleanup_many(change) if is_multi else self._staged.cleanup(change)
+ 
+         if blocking:
+             status = "halted"
+diff --git a/src/devflow_runtime/runtime/kernel.py b/src/devflow_runtime/runtime/kernel.py
+index 92aeac7..ebaeb94 100644
+--- a/src/devflow_runtime/runtime/kernel.py
++++ b/src/devflow_runtime/runtime/kernel.py
+@@ -158,7 +158,7 @@ class RuntimeKernel:
+         )
+ 
+     def observe(self, session_id: str) -> RuntimeContext:
+-        events = self._store().read_all()
++        events = self._session_events(session_id)
+         reducer = Reducer()
+         state = reducer.reduce(events)
+         intent = reducer.reduce_intent(events)
+@@ -191,9 +191,23 @@ class RuntimeKernel:
+         )
+ 
+     def status(self, session_id: str) -> RuntimeState:
+-        events = self._store().read_all()
++        events = self._session_events(session_id)
+         return Reducer().reduce(events)
+ 
++    def _session_events(self, session_id: str) -> list:
++        """Return only events that belong to ``session_id`` (aggregate_id filter).
++
++        Two consecutive sessions in one workspace must remain isolated: each
++        session rebuilds its own Intent, Evidence, blocking reasons and
++        revision. Reducing over the unfiltered event stream would let an
++        earlier session's actions leak into a later session's state.
++        """
++        return [
++            event
++            for event in self._store().read_all()
++            if event.aggregate_id == session_id
++        ]
++
+     def recover(self, session_id: str) -> RecoveryResult:
+         journal = ActionJournal(self._journal_dir())
+         pending = journal.pending()
+diff --git a/tests/test_test_command_evidence.py b/tests/test_test_command_evidence.py
+new file mode 100644
+index 0000000..eae128f
+--- /dev/null
++++ b/tests/test_test_command_evidence.py
+@@ -0,0 +1,113 @@
++"""Phase 0 Runtime protocol tests: configured ``test_command`` becomes part of
++the trusted evidence chain. A required ``test`` acceptance only ``finish``es
++when the configured command succeeds; a non-zero exit must force a halt.
++
++The command argv is taken from ``RuntimeKernel(test_command=...)``, which
++the protocol CLI populates from ``config/runtime.yaml``. We bypass the
++subprocess spawning here only by injecting argv into the kernel directly.
++"""
++
++from __future__ import annotations
++
++import pathlib
++import sys
++
++from devflow_runtime.domain.action import Action
++from devflow_runtime.domain.intent import Acceptance, IntentDocument
++from devflow_runtime.runtime.kernel import RuntimeKernel
++
++
++def _intent() -> IntentDocument:
++    return IntentDocument(
++        id="intent-tc",
++        version="1.0.0",
++        requirements=["run the configured test command"],
++        acceptances=[Acceptance(id="acc-test", verifier_ref="test", required=True)],
++        constraints=[],
++    )
++
++
++def _action(target: pathlib.Path, action_id: str, state_revision: int) -> Action:
++    return Action(
++        id=action_id,
++        kind="file_edit",
++        actor="agent",
++        target_paths=[str(target)],
++        payload={"edit": {"path": str(target), "patch": "x = 1\n", "expected_digest": ""}},
++        intent_version="1.0.0",
++        policy_version="1.0.0",
++        state_revision=state_revision,
++        idempotency_key=f"ik-{action_id}",
++    )
++
++
++def test_successful_test_command_produces_trusted_test_evidence_and_finishes(
++    tmp_path: pathlib.Path,
++) -> None:
++    """When ``test_command`` exits 0, the test verifier emits trusted evidence
++    and the Decision Engine reaches ``finish``."""
++    workspace = tmp_path / "ws"
++    workspace.mkdir()
++    target = workspace / "a.py"
++    target.write_text("old\n", encoding="utf-8")
++    kernel = RuntimeKernel(
++        workspace_root=workspace,
++        event_store_dir=tmp_path / "es",
++        test_command=[sys.executable, "-c", "print('ok')"],
++    )
++    session = kernel.start(_intent())
++    result = kernel.request_action(session.id, _action(target, "act-ok", session.state_revision))
++
++    assert result.decision.kind == "finish", result.decision
++    # The EventStore must contain a trusted ``test`` evidence event that
++    # records the literal argv and a zero exit code.
++    events = kernel._store().read_all()
++    test_evidence = [
++        e for e in events
++        if e.event_type == "evidence_generated"
++        and e.payload.get("evidence", {}).get("provenance") == "test"
++    ]
++    assert test_evidence, "no test evidence event recorded"
++    last = test_evidence[-1].payload["evidence"]
++    assert last["trusted"] is True
++    assert last["payload"]["exit_code"] == 0
++    assert last["payload"]["command"] == [sys.executable, "-c", "print('ok')"]
++
++
++def test_failing_test_command_blocks_finish_and_records_rejection(
++    tmp_path: pathlib.Path,
++) -> None:
++    """A non-zero exit must produce untrusted test evidence, halt the
++    session, and surface the failure reason in ``blocking_reasons``."""
++    workspace = tmp_path / "ws"
++    workspace.mkdir()
++    target = workspace / "a.py"
++    target.write_text("old\n", encoding="utf-8")
++    kernel = RuntimeKernel(
++        workspace_root=workspace,
++        event_store_dir=tmp_path / "es",
++        test_command=[sys.executable, "-c", "import sys; sys.exit(3)"],
++    )
++    session = kernel.start(_intent())
++    result = kernel.request_action(session.id, _action(target, "act-fail", session.state_revision))
++
++    # finish is forbidden when the configured test command failed.
++    assert result.decision.kind == "halt", result.decision
++    assert "test" in (result.decision.reason or "").lower()
++    state = kernel.status(session.id)
++    assert state.terminal is False
++    # Untrusted test evidence plus an ``action_rejected`` event are required.
++    events = kernel._store().read_all()
++    test_evidence = [
++        e for e in events
++        if e.event_type == "evidence_generated"
++        and e.payload.get("evidence", {}).get("provenance") == "test"
++    ]
++    assert test_evidence[-1].payload["evidence"]["trusted"] is False
++    assert test_evidence[-1].payload["evidence"]["payload"]["exit_code"] == 3
++    rejected = [
++        e for e in events
++        if e.event_type == "action_rejected"
++        and "test" in str(e.payload.get("reason", "")).lower()
++    ]
++    assert rejected, "expected action_rejected event carrying the test failure"
+diff --git a/tests/test_two_session_isolation.py b/tests/test_two_session_isolation.py
+new file mode 100644
+index 0000000..431dcb0
+--- /dev/null
++++ b/tests/test_two_session_isolation.py
+@@ -0,0 +1,123 @@
++"""Phase 0 Runtime regression: two consecutive sessions in one workspace must
++remain isolated. Session B must not inherit Session A's intent, revision,
++evidence, blocking reasons, or terminal decision.
++
++The Runtime Kernel, the Action Gateway, ``status``, ``recover`` and the
++``observe`` projection all filter on ``aggregate_id == session_id`` before
++reducing events, so a fresh session begins at its own revision with only
++its own facts in scope.
++"""
++
++from __future__ import annotations
++
++import pathlib
++
++from devflow_runtime.domain.action import Action
++from devflow_runtime.domain.intent import Acceptance, IntentDocument
++from devflow_runtime.runtime.kernel import RuntimeKernel
++
++
++def _intent(label: str) -> IntentDocument:
++    return IntentDocument(
++        id=f"intent-{label}",
++        version="1.0.0",
++        requirements=[f"work for {label}"],
++        acceptances=[Acceptance(id=f"acc-{label}", verifier_ref="diff", required=True)],
++        constraints=[],
++    )
++
++
++def _make_action(target: pathlib.Path, action_id: str, state_revision: int) -> Action:
++    return Action(
++        id=action_id,
++        kind="file_edit",
++        actor="agent",
++        target_paths=[str(target)],
++        payload={"edit": {"path": str(target), "patch": "x = 1\n", "expected_digest": ""}},
++        intent_version="1.0.0",
++        policy_version="1.0.0",
++        state_revision=state_revision,
++        idempotency_key=f"ik-{action_id}",
++    )
++
++
++def test_session_b_does_not_inherit_session_a_state(tmp_path: pathlib.Path) -> None:
++    """Session A finishes; Session B must start at its own revision with no
++    inherited evidence, changed paths, or terminal state from Session A."""
++    workspace = tmp_path / "ws"
++    store = tmp_path / "es"
++    kernel = RuntimeKernel(workspace_root=workspace, event_store_dir=store)
++
++    # Session A: complete one accepted action and finish.
++    a = kernel.start(_intent("a"))
++    target_a = workspace / "a.py"
++    target_a.write_text("old\n", encoding="utf-8")
++    result_a = kernel.request_action(a.id, _make_action(target_a, "act-a", a.state_revision))
++    assert result_a.status == "applied"
++    assert result_a.decision.kind == "finish"
++    state_a = kernel.status(a.id)
++    assert state_a.terminal is True
++    assert state_a.changed_paths == [str(target_a)]
++
++    # Session B: must observe its own revision (>=0), empty changed_paths,
++    # no trusted evidence carried over from Session A.
++    b = kernel.start(_intent("b"))
++    assert b.state_revision == 0
++    assert b.intent_id == "intent-b"
++    ctx_b = kernel.observe(b.id)
++    assert ctx_b.intent.id == "intent-b"
++    assert ctx_b.state.revision == 0
++    assert ctx_b.state.changed_paths == []
++    assert ctx_b.state.evidence_ids == []
++    assert ctx_b.state.terminal is False
++    assert ctx_b.state.blocking_reasons == []
++    # Session B's status must not see Session A's terminal state.
++    assert kernel.status(b.id).terminal is False
++    assert kernel.status(b.id).evidence_ids == []
++
++
++def test_session_b_evidence_does_not_leak_into_session_a_status(
++    tmp_path: pathlib.Path,
++) -> None:
++    """Conversely, Session A's status must remain stable after Session B
++    generates new evidence — each session reads only its own event stream.
++    """
++    workspace = tmp_path / "ws"
++    store = tmp_path / "es"
++    kernel = RuntimeKernel(workspace_root=workspace, event_store_dir=store)
++
++    a = kernel.start(_intent("a"))
++    target_a = workspace / "a.py"
++    target_a.write_text("old\n", encoding="utf-8")
++    kernel.request_action(a.id, _make_action(target_a, "act-a", a.state_revision))
++    a_evidence_count = len(kernel.status(a.id).evidence_ids)
++    assert a_evidence_count > 0
++    assert kernel.status(a.id).terminal is True
++
++    b = kernel.start(_intent("b"))
++    target_b = workspace / "b.py"
++    target_b.write_text("old\n", encoding="utf-8")
++    kernel.request_action(b.id, _make_action(target_b, "act-b", b.state_revision))
++
++    # Session A is terminal and its evidence list is unchanged.
++    assert kernel.status(a.id).terminal is True
++    assert kernel.status(a.id).evidence_ids  # still present, untouched
++    assert len(kernel.status(a.id).evidence_ids) == a_evidence_count
++    assert kernel.status(a.id).changed_paths == [str(target_a)]
++
++
++def test_session_a_recover_does_not_see_session_b_journal(tmp_path: pathlib.Path) -> None:
++    """Recovery rebuilds state strictly from the named session's events."""
++    workspace = tmp_path / "ws"
++    store = tmp_path / "es"
++    kernel = RuntimeKernel(workspace_root=workspace, event_store_dir=store)
++
++    a = kernel.start(_intent("a"))
++    b = kernel.start(_intent("b"))
++
++    rec_a = kernel.recover(a.id)
++    rec_b = kernel.recover(b.id)
++    # Two distinct sessions, two distinct recovery results, no cross-talk.
++    assert rec_a.session_id == a.id
++    assert rec_b.session_id == b.id
++    assert rec_a.session_id != rec_b.session_id
+-- 
+2.53.0.windows.2
+

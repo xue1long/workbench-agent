@@ -68,6 +68,32 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Apply workbench-agent-local patches to sister repo
+        # The sister repo (xue1long/devflow-runtime) has known-good fixes
+        # (clock staleness + session isolation) that we depend on but haven't
+        # been pushed yet. Apply them idempotently here. Once the sister
+        # repo's origin/main catches up, this step will no-op cleanly.
+        #
+        # Strategy: try `git apply --reverse --check` first. If it succeeds,
+        # the patch is already applied. Otherwise try forward apply.
+        # Both branches log clearly so a real conflict is visible.
+        working-directory: workbench-agent
+        run: |
+          set -e
+          for p in .devflow-runtime-patches/*.patch; do
+            [ -f "$p" ] || continue
+            echo "checking patch: $p"
+            if git apply --reverse --check --directory=../devflow-runtime "$p" 2>/dev/null; then
+              echo "  already applied (skipping)"
+            elif git apply --check --directory=../devflow-runtime "$p" 2>/dev/null; then
+              git apply --directory=../devflow-runtime "$p"
+              echo "  applied"
+            else
+              echo "  CONFLICT: patch neither applies nor reverses cleanly"
+              git apply --check --directory=../devflow-runtime "$p" || true
+              exit 1
+            fi
+          done
       - name: Install runtime + test deps
         working-directory: devflow-runtime
         run: |
