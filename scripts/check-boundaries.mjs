@@ -36,7 +36,11 @@ const MATRIX = [
   { src: 'adapters', allow: ['core', 'adapters'], forbidConcrete: ['apps', 'src'] },
   { src: 'core/intelligence', allow: ['core/(?!laboratory)'], forbidConcrete: ['apps', 'adapters'] },
   { src: 'core/laboratory', allow: ['core'], forbidConcrete: ['apps'] },
-  { src: 'core', allow: ['core'], forbidConcrete: ['adapters', 'apps', 'src'] },
+  // core/* may import `adapters/index.js` (the registry entry point) for
+  // its side effect of registering concrete adapters, but it must NOT
+  // import concrete adapter files directly. The boundary gate enforces
+  // that distinction via the `adapters-concrete` token below.
+  { src: 'core', allow: ['core', 'adapters-concrete'], forbidConcrete: ['adapters', 'apps', 'src'] },
   { src: 'schemas', allow: [], forbidConcrete: [] },
 ];
 
@@ -165,25 +169,53 @@ function classifyTarget(srcPrefix, targetRepoPath) {
     top === 'adapters' &&
     targetRepoPath !== 'adapters/index.js' &&
     targetRepoPath !== 'adapters/index.mjs';
+  const isAdapterIndex =
+    top === 'adapters' &&
+    (targetRepoPath === 'adapters/index.js' || targetRepoPath === 'adapters/index.mjs');
 
-  // Concrete-adapter files are forbidden unless the source row explicitly
-  // allows them. Two exceptions:
-  //   - `src/` is the CLI bootstrap surface (uses `adapters-concrete` token)
-  //   - `adapters/` may import sibling concrete files (e.g. process-planner
-  //     borrows runProcess from process-agent); same-subtree helpers are
-  //     legitimate, not boundary violations.
-  const sameSubtreeConcrete =
-    srcPrefix === 'adapters' && targetRepoPath.startsWith('adapters/');
-  const srcBootstrapConcrete = row.allow.includes('adapters-concrete');
-  if (isAdapterConcrete && !sameSubtreeConcrete && !srcBootstrapConcrete) {
+  // adapters-concrete is a per-row special token that controls the
+  // concrete-adapter exception:
+  //   - For src/: allows ANY adapters/* file (CLI bootstrap wires up
+  //     concrete classes by name).
+  //   - For core/: allows ONLY adapters/index.js (the registry entry
+  //     point); concrete adapter files are still forbidden.
+  const allowsConcreteAdapters =
+    row.allow.includes('adapters-concrete') && row.src === 'src';
+  const allowsAdapterIndex =
+    row.allow.includes('adapters-concrete') && row.src === 'core';
+
+  // Concrete-adapter files: forbidden unless the row explicitly allows
+  // them via the src-bootstrap exception OR the source file is the
+  // adapters/ bulk-import entry point (any file literally named
+  // index.js or index.mjs under adapters/ — these are the registry
+  // surface the boundary contract specifically permits).
+  const isAdapterIndexFile =
+    srcPrefix.startsWith('adapters') &&
+    (srcPrefix === 'adapters' || srcPrefix.endsWith('/index'));
+  if (isAdapterConcrete && !allowsConcreteAdapters && !isAdapterIndexFile) {
     return {
       kind: 'forbidden-concrete',
       reason: 'concrete adapter file (use adapters/index.js)',
     };
   }
 
-  // forbidConcrete entries forbid whole top-level dirs.
-  if (row.forbidConcrete.includes(top)) {
+  // forbidConcrete entries forbid concrete top-level dirs; the index
+  // entry point is not concrete and is handled below. Only apply
+  // forbidConcrete to concrete targets.
+  if (row.forbidConcrete.includes(top) && !isAdapterIndex) {
+    return {
+      kind: 'forbidden-direction',
+      reason: `${row.src} may not import ${top}`,
+    };
+  }
+
+  // adapters/index.js: when the row is core/, this is the only allowed
+  // way to touch the adapters subtree. For other rows that don't list
+  // 'adapters' or 'adapters-concrete', this is still forbidden.
+  if (isAdapterIndex) {
+    if (allowsAdapterIndex || row.allow.includes('adapters') || row.allow.includes('adapters-concrete')) {
+      return { kind: 'allowed' };
+    }
     return {
       kind: 'forbidden-direction',
       reason: `${row.src} may not import ${top}`,
@@ -195,7 +227,7 @@ function classifyTarget(srcPrefix, targetRepoPath) {
   //   - a regex pattern starting with "(?!" (negative lookahead) or any
   //     string containing regex metachars.
   for (const allowed of row.allow) {
-    if (allowed === 'adapters-concrete') continue; // already handled above
+    if (allowed === 'adapters-concrete') continue; // handled above
     if (allowed.includes('(') || allowed.includes('[') || allowed.includes('.')) {
       const re = new RegExp(`^${allowed}`);
       if (re.test(targetRepoPath)) return { kind: 'allowed' };

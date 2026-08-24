@@ -15,15 +15,17 @@ import { createSnapshot } from './snapshot.mjs';
 import { loadManifest } from './manifest-load.mjs';
 import { validateManifest, ManifestError } from './manifest-validate.mjs';
 import { ProjectManager } from './projects.mjs';
-import { GitAdapter } from '../adapters/git.mjs';
-import { NodeAdapter } from '../adapters/node.mjs';
-import { PythonAdapter } from '../adapters/python.mjs';
-import { UvAdapter } from '../adapters/uv.mjs';
+import { getAdapter } from './adapters.mjs';
 import { ObservedState } from './state.mjs';
 import { StateStore } from './store.mjs';
 import { AuditLog } from './audit.mjs';
 import { applyPlan } from './apply.mjs';
 import { planFromManifest } from './plan.mjs';
+
+// Side-effect import: registers concrete adapters with the registry in
+// core/adapters.mjs. Required because getAdapter() throws on unknown ids
+// until adapters/index.js has been loaded.
+import '../adapters/index.js';
 
 export class SyncError extends Error {
   constructor(message, options = {}) {
@@ -80,7 +82,7 @@ export async function syncWorkspace(manifestPath, options = {}) {
   if (!options.skipAllProjects) {
     const projects = manifest.projects ?? [];
     if (projects.length > 0) {
-      const git = options.git ?? new GitAdapter(options.gitOptions ?? {});
+      const git = options.git ?? getAdapter('git', options.gitOptions ?? {});
       const pm = new ProjectManager({ git });
       projectReport = pm.sync(projects, root, { continueOnError: options.continueOnError === true });
     }
@@ -132,9 +134,9 @@ async function detectObserved(adapters) {
 
 function defaultAdapterMap() {
   const map = new Map();
-  map.set('node', new NodeAdapter());
-  map.set('python', new PythonAdapter());
-  map.set('uv', new UvAdapter());
+  map.set('node', getAdapter('node'));
+  map.set('python', getAdapter('python'));
+  map.set('uv', getAdapter('uv'));
   return map;
 }
 

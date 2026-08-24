@@ -24,13 +24,12 @@ import { planFromManifest } from './plan.mjs';
 import { readLockfile, LockfileError } from './lockfile.mjs';
 import { buildLockfile, writeLockfile } from './lockfile.mjs';
 import { ObservedState } from './state.mjs';
-import { NodeAdapter } from '../adapters/node.mjs';
-import { PythonAdapter } from '../adapters/python.mjs';
-import { UvAdapter } from '../adapters/uv.mjs';
-import { ClaudeCodeAdapter } from '../adapters/claude-code.mjs';
-import { CodexAdapter } from '../adapters/codex.mjs';
+import { getAdapter } from './adapters.mjs';
 import { StateStore } from './store.mjs';
 import { AuditLog } from './audit.mjs';
+
+// Side-effect import: registers concrete adapters with the registry.
+import '../adapters/index.js';
 
 export class RestoreError extends Error {
   constructor(message, options = {}) {
@@ -148,11 +147,11 @@ async function detectObservedState(adapters) {
 
 function defaultAdapterMap() {
   const map = new Map();
-  map.set('node', new NodeAdapter());
-  map.set('python', new PythonAdapter());
-  map.set('uv', new UvAdapter());
-  map.set('claude-code', new ClaudeCodeAdapter());
-  map.set('codex', new CodexAdapter());
+  map.set('node', getAdapter('node'));
+  map.set('python', getAdapter('python'));
+  map.set('uv', getAdapter('uv'));
+  map.set('claude-code', getAdapter('claude-code'));
+  map.set('codex', getAdapter('codex'));
   return map;
 }
 

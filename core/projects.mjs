@@ -13,7 +13,10 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { GitAdapter } from '../adapters/git.mjs';
+import { getAdapter } from './adapters.mjs';
+
+// Side-effect import: registers concrete adapters with the registry.
+import '../adapters/index.js';
 
 export class ProjectError extends Error {
   constructor(message, options = {}) {
@@ -77,7 +80,7 @@ function resolveProjectPath(root, projPath) {
 
 export class ProjectManager {
   constructor(options = {}) {
-    this._git = options.git ?? new GitAdapter(options.gitOptions ?? {});
+    this._git = options.git ?? getAdapter('git', options.gitOptions ?? {});
     this._fs = options.fs ?? fs;
   }
   /**
