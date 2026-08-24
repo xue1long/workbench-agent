@@ -28,6 +28,8 @@ jobs:
           cache: 'none'
       - name: Syntax check
         run: node scripts/check-syntax.mjs
+      - name: Boundary contract check
+        run: node scripts/check-boundaries.mjs
       - name: Format check
         run: node scripts/check-format.mjs
       - name: Version / CHANGELOG check
