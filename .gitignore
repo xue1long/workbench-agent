@@ -1,5 +1,6 @@
 # Runtime scratch directories
 .devflow-runtime/
+.devflow/        # devflow-runtime learn() drops a graph.json + policies.toml here
 .workbench/
 .uv-cache/
 .runtime-python/

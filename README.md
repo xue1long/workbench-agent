@@ -113,6 +113,14 @@ DevFlow Runtime Python tests live in a separate job in CI and are not run from t
 
 The project is a single-package repository. The `core/` directory is intentionally import-pure and free of global state, which is exactly the boundary a future monorepo split would carve along (`@workbench/core`, `@workbench/dashboard`, `@workbench/cli`). The `package.json` `exports` field is structured to make that split mechanical. See `docs/ENGINEERING.md` for the rationale, the boundary contract, and the migration plan.
 
+## Architecture audits
+
+Honest periodic assessments of where the architecture actually stands — what's enforced, what's documented but not gated, and what's open. Each audit links to its plan(s), acceptance doc(s), and the runtime governance trail.
+
+- `docs/architecture-self-audit-2026-08-24.md` — baseline audit; closed gap 1 (`core/` → `adapters/` reverse dependencies), identified gaps 2-6.
+
+
+
 ## Repository conventions
 
 - Conventional Commits on every commit (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`).
