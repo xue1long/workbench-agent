@@ -7,7 +7,7 @@
 // Apply: M2 no-op (see node.mjs for rationale).
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter, applyResult } from '../core/adapters.mjs';
+import { BaseAdapter, applyResult, registerAdapter } from '../core/adapters.mjs';
 import { ResourceState } from '../core/state.mjs';
 
 const EXECUTABLE_CANDIDATES = Object.freeze(['python', 'python.exe', 'python3', 'python3.exe']);
@@ -77,3 +77,6 @@ export class PythonAdapter extends BaseAdapter {
     };
   }
 }
+
+
+registerAdapter({ id: 'python', kind: 'tool', factory: (opts = {}) => new PythonAdapter(opts) });

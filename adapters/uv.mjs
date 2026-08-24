@@ -7,7 +7,7 @@
 // Apply: M2 no-op (see node.mjs for rationale).
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter, applyResult } from '../core/adapters.mjs';
+import { BaseAdapter, applyResult, registerAdapter } from '../core/adapters.mjs';
 import { ResourceState } from '../core/state.mjs';
 
 const EXECUTABLE_CANDIDATES = Object.freeze(['uv', 'uv.exe']);
@@ -76,3 +76,6 @@ export class UvAdapter extends BaseAdapter {
     };
   }
 }
+
+
+registerAdapter({ id: 'uv', kind: 'tool', factory: (opts = {}) => new UvAdapter(opts) });

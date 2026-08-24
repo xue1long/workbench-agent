@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
+import { registerAdapter } from '../core/adapters.mjs';
 
 export class DevflowRuntimeError extends Error {
   constructor(code, message, details = null) {
@@ -229,3 +230,5 @@ export class DevflowRuntimeAdapter {
     };
   }
 }
+
+registerAdapter({ id: 'devflow-runtime', kind: 'tool', factory: (opts = {}) => new DevflowRuntimeAdapter(opts) });

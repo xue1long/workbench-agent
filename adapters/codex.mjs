@@ -8,7 +8,7 @@
 // injectable `runner` so CI never has to spawn a real `codex` binary.
 
 import { spawnSync } from 'node:child_process';
-import { BaseAdapter } from '../core/adapters.mjs';
+import { BaseAdapter, registerAdapter } from '../core/adapters.mjs';
 import { ResourceState } from '../core/state.mjs';
 
 const EXECUTABLE_CANDIDATES = Object.freeze(['codex', 'codex.exe']);
@@ -106,3 +106,6 @@ export class CodexAdapter extends BaseAdapter {
     return { mcp_servers: mcpServers };
   }
 }
+
+
+registerAdapter({ id: 'codex', kind: 'tool', factory: (opts = {}) => new CodexAdapter(opts) });
