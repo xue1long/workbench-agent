@@ -173,3 +173,57 @@ export async function planOne(adapter, desiredVersion) {
   const observed = await adapter.detect();
   return { resource: adapter.id, ...diffResource(desiredVersion, observed.version) };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Adapter registry
+//
+// The boundary contract (docs/ENGINEERING.md) forbids core/* from importing
+// concrete adapter classes. This registry is the single allowed surface:
+// concrete adapters self-register at module load time (see Task 3 in
+// docs/superpowers/plans/2026-08-24-architecture-boundary-enforcement.md),
+// and core/* modules obtain instances via getAdapter(id) instead of `new
+// ConcreteAdapter()`.
+//
+// Tests can use _resetAdaptersForTests() to clear the registry between cases.
+// Production code MUST NOT call _resetAdaptersForTests.
+// ─────────────────────────────────────────────────────────────────────────
+
+const _registry = new Map();
+
+export function registerAdapter({ id, kind = 'tool', factory }) {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new AdapterError('id is required', { code: 'ADAPTER_REGISTRY_BAD_ID' });
+  }
+  if (typeof factory !== 'function') {
+    throw new AdapterError('factory must be a function', {
+      code: 'ADAPTER_REGISTRY_BAD_FACTORY',
+      resource: id,
+    });
+  }
+  if (_registry.has(id)) {
+    throw new AdapterError(`adapter already registered: ${id}`, {
+      code: 'ADAPTER_REGISTRY_DUPLICATE',
+      resource: id,
+    });
+  }
+  _registry.set(id, { id, kind, factory });
+}
+
+export function getAdapter(id, options = {}) {
+  const entry = _registry.get(id);
+  if (!entry) {
+    throw new AdapterError(`no adapter registered for: ${id}`, {
+      code: 'ADAPTER_REGISTRY_UNKNOWN',
+      resource: id,
+    });
+  }
+  return entry.factory(options);
+}
+
+export function listAdapters() {
+  return Array.from(_registry.keys()).sort();
+}
+
+export function _resetAdaptersForTests() {
+  _registry.clear();
+}
