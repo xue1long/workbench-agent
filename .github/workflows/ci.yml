@@ -70,27 +70,28 @@ jobs:
           python-version: '3.11'
       - name: Apply workbench-agent-local patches to sister repo
         # The sister repo (xue1long/devflow-runtime) has known-good fixes
-        # (clock staleness + session isolation) that we depend on but haven't
-        # been pushed yet. Apply them idempotently here. Once the sister
-        # repo's origin/main catches up, this step will no-op cleanly.
+        # (clock staleness + session isolation) that we depend on but
+        # haven't been pushed yet. Apply them idempotently from inside the
+        # sister repo's working directory, using `git apply -p1` to strip
+        # the patch's `a/`/`b/` prefixes.
         #
-        # Strategy: try `git apply --reverse --check` first. If it succeeds,
-        # the patch is already applied. Otherwise try forward apply.
+        # Idempotency: try `git apply --reverse --check` first; if it
+        # succeeds, the patch is already applied. Otherwise try forward.
         # Both branches log clearly so a real conflict is visible.
-        working-directory: workbench-agent
         run: |
           set -e
-          for p in .devflow-runtime-patches/*.patch; do
+          cd ../devflow-runtime
+          for p in ../workbench-agent/.devflow-runtime-patches/*.patch; do
             [ -f "$p" ] || continue
-            echo "checking patch: $p"
-            if git apply --reverse --check --directory=../devflow-runtime "$p" 2>/dev/null; then
+            echo "checking patch: $(basename "$p")"
+            if git apply --reverse --check -p1 "$p" 2>/dev/null; then
               echo "  already applied (skipping)"
-            elif git apply --check --directory=../devflow-runtime "$p" 2>/dev/null; then
-              git apply --directory=../devflow-runtime "$p"
+            elif git apply --check -p1 "$p" 2>/dev/null; then
+              git apply -p1 "$p"
               echo "  applied"
             else
               echo "  CONFLICT: patch neither applies nor reverses cleanly"
-              git apply --check --directory=../devflow-runtime "$p" || true
+              git apply --check -p1 "$p" || true
               exit 1
             fi
           done

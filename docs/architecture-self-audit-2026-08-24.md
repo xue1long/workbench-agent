@@ -439,3 +439,100 @@ Lesson: **the failing step is almost always named in the error itself**,
 and the next step after it usually is too. Both `019ae96` and `a1d3806`
 were diagnosing symptoms (ENOENT, "Test step failed") rather than the
 failing step name in the job log.
+
+---
+
+## Post-audit event 4: sister-repo stale-clock pytest failures (2026-08-24)
+
+After `0d8e35d` landed, the engineering jobs went green on CI but the
+**devflow-runtime pytest job** kept failing with the same 5 tests:
+
+```
+FAILED tests/integration/test_final_gate.py::test_scenario_1_builder_l1_verifiers_effect_gateway_finish_closure
+FAILED tests/integration/test_final_gate.py::test_scenario_4_audit_export_full_authorization_chain
+FAILED tests/test_effect_gateway.py::test_irreversible_with_human_authorization_applies
+FAILED tests/test_operations.py::test_compensation_applied
+FAILED tests/test_operations.py::test_compensation_failure_quarantines
+```
+
+Root cause: those test files live in the **sister repo**
+(`xue1long/devflow-runtime`), and the version CI checks out — origin's
+`master` HEAD = `0e0c0a4` — uses hard-coded stale fixtures:
+
+```python
+def _utc() -> _dt.datetime:
+    return _dt.datetime(2026, 8, 21, 12, 0, tzinfo=_dt.timezone.utc)
+```
+
+Today is 2026-08-24. With `hours_valid=24`, the authorization
+expires at 2026-08-22 12:00 UTC — 45 hours in the past.
+`is_valid()` returns False; the test expects `'applied'` but
+gets `'failed'`.
+
+The user already fixed this locally with two unpushed commits
+(`27f222b fix(tests): derive authorization timestamps from current
+UTC clock`, `01531ca fix(runtime): isolate consecutive sessions,
+plumb test_command`). The fix changes `_utc()` to use
+`_dt.datetime.now(_dt.timezone.utc)`.
+
+Why local pytest "passed" before fix: `tests/__pycache__/` on the
+local dev machine cached `.pyc` bytecode from the post-fix HEAD,
+so pytest loaded the fixed version regardless of source-file content.
+CI on a clean checkout has no `__pycache__`, so pytest compiles
+the stale source from origin → fails.
+
+Why the workbench-agent audit didn't catch this: previous audit
+rounds focused on the engineering job (Node 22/24) which was the
+*visible* failing step name. The devflow-runtime pytest job was
+failing for a different reason entirely — in another repo.
+
+Fix (commits `5a568bd`, `e9d2c43`):
+
+1. **Vendor the sister's known-good fixes** into workbench-agent at
+   `.devflow-runtime-patches/0001-clock-and-isolation-fixes.patch`
+   (generated from `git format-patch origin/master..HEAD` in the
+   sister repo). Tracked in git.
+2. **Add a CI step** in the devflow-runtime job that applies each
+   patch idempotently before pytest runs. Strategy:
+   - `cd ../devflow-runtime`
+   - For each patch: try `git apply --reverse --check -p1`; if it
+     succeeds the patch is already applied; otherwise try forward
+     `git apply --check -p1` then `git apply -p1`.
+   - The `-p1` strips the patch's `a/`/`b/` prefixes.
+   - A real conflict surfaces as exit 1 with the git apply
+     diagnostic visible in CI logs.
+
+The first attempt (`5a568bd`) used `git apply --directory=../devflow-runtime`,
+which prepends the path to the patch's source — causing git to try
+to write files outside the workbench-agent worktree on Windows.
+Linux CI likely tolerated it, but the patch may or may not have
+applied successfully. Switched to `cd ../devflow-runtime &&
+git apply -p1` in `e9d2c43` — the standard idiom for applying
+patches to a target worktree.
+
+Once the sister repo's origin/master catches up to `01531ca` (or
+beyond), the patch becomes a no-op and can be removed in a
+follow-up commit.
+
+Verified locally:
+- Fresh clone of `xue1long/devflow-runtime @ origin/master`:
+  - Without patch: 5 failures (matching the user's pasted CI log)
+  - With patch applied: 0 of those 5 (5/5 pass)
+- The other 2 `test_level2_failure_injection.py::test_multi_file_*`
+  failures exist on origin/master pre-existing and are **not** part
+  of the user's pasted failure list. They are the sister repo's
+  separate bug (`StagedWorkspace` has no `prepare_many`).
+
+This is the **fourth** diagnosis in this audit session. Past
+guesses that turned out wrong:
+- (commit `019ae96`) "Windows-specific process-handle exhaustion"
+- (commit `a1d3806`) "Node 22 `node --test tests/` glob bug"
+- (commit `0d8e35d` correctly identified) `release-dry-run.mjs`
+  npm-cli.js fallback
+- (commits `5a568bd` first attempt, then `e9d2c43`) sister-repo
+  stale-clock fixtures
+
+Lesson: **when CI fails, read the failing step name in the job log
+first** — engineering failure modes I investigated earlier were
+all from a different step than the actual one (devflow-runtime
+pytest). Local repros were masked by `__pycache__`.
