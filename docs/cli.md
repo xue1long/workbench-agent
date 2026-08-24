@@ -50,7 +50,7 @@ The "Machine A" half of the M4 acceptance scenario. Captures a snapshot of manag
 
 ### `workbench restore [--manifest PATH] [--apply]`
 
-The "Machine B" half. Reads the manifest + (optional) `workspace.lock`. If a lockfile is present, its pinned versions are used as the observed baseline (so a clean VM plans SKIP, not spurious INSTALL). On lockfile drift (manifest versions newer than lockfile), restore refreshes the lockfile automatically. Re-running on a converged host reports `NO CHANGES`.
+The "Machine B" half. Reads the manifest + (optional) `workspace.lock`. If a lockfile is present, its pinned versions are used as the observed baseline (so a clean VM plans SKIP, not spurious INSTALL). On lockfile drift (manifest versions newer than lockfile), restore refreshes the lockfile automatically. Re-running on a converged host reports`NO CHANGES`.
 
 ### `workbench rollback --to <snapshotId>`
 
@@ -73,7 +73,7 @@ See `schemas/workspace.schema.json`. The hard-required fields are:
 
 - `version: "1"`
 - `workspace.id` — ASCII identifier (`[A-Za-z0-9._-]+`)
-- `environment` — object whose keys are restricted to `node | python | uv`, with `version` strings matching `[A-Za-z0-9._+\-:]`
+- `environment` — object whose keys are restricted to`node | python | uv`, with `version` strings matching `[A-Za-z0-9._+\-:]`
 
 Optional sections:
 
