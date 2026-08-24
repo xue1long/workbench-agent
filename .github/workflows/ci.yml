@@ -16,7 +16,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24]
+        # Node 20 was deprecated on GitHub Actions hosted runners on
+        # 2025-09-19; see
+        # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+        # We test on the LTS line that still works on the runner
+        # images (Node 22 and Node 24). package.json still declares
+        # "engines": { "node": ">=20" } so local Node 20 keeps working;
+        # CI does not block on the deprecated runner image.
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +32,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'none'
+          # setup-node@v4 rejects `cache: 'none'` (see actions/setup-node PR #917).
+          # Omit the field instead — package.json has no npm deps so no
+          # cache is needed.
       - name: Syntax check
         run: node scripts/check-syntax.mjs
       - name: Boundary contract check
