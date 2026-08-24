@@ -34,13 +34,27 @@ function adapterRunnerFactory() {
     const cmd = executableForLocalCli();
     const rest = argv.slice(1); // drop the 'devflow-runtime' placeholder
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd.executable, [...cmd.prefixArgs, ...rest], { shell: false, windowsHide: true });
+      let proc;
+      try {
+        proc = spawn(cmd.executable, [...cmd.prefixArgs, ...rest], { shell: false, windowsHide: true });
+      } catch (err) {
+        // ENOENT and friends: resolve with a structured failure rather than
+        // letting the test die on an uncaught spawn error.
+        return resolve({ stdout: '', stderr: err.message ?? String(err), exitCode: -1 });
+      }
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      const settle = (fn, payload) => {
+        if (settled) return;
+        settled = true;
+        try { if (proc && !proc.killed) proc.kill(); } catch (_) { /* ignore */ }
+        fn(payload);
+      };
       proc.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
       proc.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
-      proc.on('error', reject);
-      proc.on('close', (code) => resolve({ stdout, stderr, exitCode: code }));
+      proc.on('error', (err) => settle(resolve, { stdout, stderr, exitCode: -1, error: err.message }));
+      proc.on('close', (code) => settle(resolve, { stdout, stderr, exitCode: code }));
     });
   };
 }

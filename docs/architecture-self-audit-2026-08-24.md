@@ -311,3 +311,37 @@ fast loop is not equivalent to the full CI workflow** — external changes
 (deprecation, cache validation, runner-image availability) only show
 up in the remote runner. The self-audit doc is now an honest living
 record; update it when the next external change lands.
+
+---
+
+## Post-audit event 2: integration-test runner hardening (2026-08-24)
+
+After the CI fix landed (`6ab816f`), the next CI run reported three
+`ENOENT` failures in `tests/integration.test.mjs` from `spawn()` calls
+to the local Python interpreter. The failures were intermittent — 8+
+local `npm test` runs after the failure all passed, and `node --test
+tests/integration.test.mjs` in isolation passed 5/5 every time.
+
+Likely cause: under parallel test execution on Windows, the test
+runner's worker pool briefly exhausts a process-handle resource when
+the three integration tests fire `spawn()` within the same tick as
+other test files. `ENOENT` from `node:child_process.spawn` is
+Windows' way of saying "could not start the process right now," not
+strictly "executable not found."
+
+Fix (commit pending): harden the integration-test runner to:
+1. Wrap `spawn()` in try/catch — `ENOENT` and other spawn failures
+   now resolve to a structured `{ exitCode: -1, error }` payload
+   rather than throwing out of the test.
+2. Add a `settle()` helper that ensures resolve fires exactly once
+   and kills the subprocess on any path, so a process is never
+   orphaned between tests.
+
+This does not address the underlying Windows process-handle
+exhaustion (which would need `--test-concurrency=1` for `npm test`).
+The trade-off: the runner is now robust to transient spawn failures
+and reports them as structured failures, but if the system is under
+enough load that ENOENT becomes persistent, the test will surface
+that as a clear `RUNTIME_SPAWN_FAILED` error rather than an unhandled
+exception. Future cleanup: add `--test-concurrency=1` to the `npm
+test` script if flake persists across runner images.
