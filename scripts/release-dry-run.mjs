@@ -26,14 +26,14 @@ function readJson(p) {
 // non-zero exit (e.g. `git status` would never throw but our own npm step
 // loop needs to record the failure).
 //
-// On Windows, `npm.cmd` is a `.cmd` shim that does not survive a bare
-// execFileSync. We invoke npm via its CLI JS file with `node` instead —
-// works everywhere, no shell, no DEP0190.
+// `npm` shells out fine on Linux/macOS (the binary on PATH). On Windows,
+// `npm.cmd` is a `.cmd` shim that does not survive bare execFileSync on
+// some Node versions. We try to invoke npm via its CLI JS file
+// (which avoids the .cmd shim), and fall back to running `npm` /
+// `npm.cmd` directly if the CLI JS file cannot be located.
 function npmCliPath() {
-  // npm-cli.js sits next to the `npm` bin entry. Resolve it via Node's own
-  // lookup, then fall back to the conventional sibling location.
-  const entries = process.execPath ? [process.execPath] : [];
-  // Common locations:
+  if (!process.execPath) return [];
+  // Common locations for npm-cli.js next to the Node binary.
   return [
     path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
     path.join(path.dirname(process.execPath), '..', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
@@ -43,12 +43,15 @@ function npmCliPath() {
 function runCapturing(cmd, args, opts = {}) {
   let finalCmd = cmd;
   let finalArgs = args;
-  if (cmd === 'npm') {
-    finalCmd = process.execPath;
-    finalArgs = [npmCliPath().find((p) => fs.existsSync(p)) ?? 'npm-cli.js', ...args];
-  } else if (process.platform === 'win32' && cmd === 'npm.cmd') {
-    finalCmd = process.execPath;
-    finalArgs = [npmCliPath().find((p) => fs.existsSync(p)) ?? 'npm-cli.js', ...args];
+  if (cmd === 'npm' || cmd === 'npm.cmd') {
+    const cli = npmCliPath().find((p) => fs.existsSync(p));
+    if (cli) {
+      finalCmd = process.execPath;
+      finalArgs = [cli, ...args];
+    }
+    // If no CLI JS file found, fall through to running `npm` / `npm.cmd`
+    // directly via PATH. This is the right thing on fresh Linux/macOS
+    // runners where npm is installed globally and not next to Node.
   }
   try {
     const stdout = execFileSync(finalCmd, finalArgs, { cwd: ROOT, encoding: 'utf8', ...opts });

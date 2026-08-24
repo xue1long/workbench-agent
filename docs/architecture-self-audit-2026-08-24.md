@@ -370,3 +370,72 @@ DFR_PYTHON=/path/to/python RUN_LIVE_RUNTIME_TESTS=1 npm test
 Future cleanup: if `RUN_LIVE_RUNTIME_TESTS=1` is wanted in CI, the
 `devflow-runtime` job should pass both env vars and run after the
 Python install step. Until then, integration tests stay local-only.
+
+---
+
+## Post-audit event 3: release-dry-run.mjs npm-cli.js fallback bug (2026-08-24)
+
+After `7fa2920` landed, CI runs (`a1d3806`) failed the **Release
+dry-run** step on Linux with:
+
+```
+Error: Cannot find module '/home/runner/work/workbench-agent/workbench-agent/npm-cli.js'
+```
+
+The duplicated `workbench-agent/workbench-agent` is `cwd + '/npm-cli.js'` —
+relative-to-cwd resolution failed. Root cause: in `scripts/release-dry-run.mjs`:
+
+```js
+function npmCliPath() {
+  return [
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ...
+  ];
+}
+function runCapturing(cmd, args, opts = {}) {
+  if (cmd === 'npm') {
+    finalArgs = [npmCliPath().find((p) => fs.existsSync(p)) ?? 'npm-cli.js', ...args];
+  }
+  ...
+}
+```
+
+When none of the candidate paths exist (which is the case on a fresh
+Linux GitHub Actions runner image — npm is on PATH but no `node_modules/npm`
+exists), `npmCliPath().find(...)` returns `undefined`, and the fallback
+`'npm-cli.js'` is a **relative** path that Node's loader resolves against
+`cwd` (which is the worktree root), giving the doubled
+`workbench-agent/workbench-agent/npm-cli.js` path you saw.
+
+This bug was **always there** — it had been masked on Windows because
+the Windows Node install bundles `npm-cli.js` at the sibling location,
+so the `find()` call returned a real path. The CI failure was a
+**timing artifact**: previous runs failed earlier (Node 20 deprecation
+and then `cache: 'none'`), so the release-dry-run step never executed.
+
+Fix (commit pending):
+
+1. `npmCliPath()` returns `[]` when `process.execPath` is absent
+   (was always `[process.execPath]` — returning a non-array of one
+   string, which `find()` ignored anyway).
+2. `runCapturing()` only overrides the command if a CLI JS file was
+   actually found. When no candidate path exists, the original `npm`
+   / `npm.cmd` is run directly via PATH. This is the right thing on
+   fresh Linux/macOS runners where npm is installed globally.
+
+Side note: the debug step added in `a1d3806` was useful — it printed
+the exact `Cannot find module` error after the npm test step completed,
+which pointed straight at the release-dry-run bug. The debug step is
+removed in this commit since the bug is identified.
+
+This is the **third** diagnosis in this audit session. Past guesses
+that turned out wrong:
+- (commit `019ae96`) "Windows-specific process-handle exhaustion" — wrong,
+  the real issue was a Linux runner seeing a Windows-only Python path.
+- (commit `a1d3806`) "Node 22 `node --test tests/` glob bug" — wrong,
+  the real issue was `release-dry-run.mjs` failing on every Node version.
+
+Lesson: **the failing step is almost always named in the error itself**,
+and the next step after it usually is too. Both `019ae96` and `a1d3806`
+were diagnosing symptoms (ENOENT, "Test step failed") rather than the
+failing step name in the job log.

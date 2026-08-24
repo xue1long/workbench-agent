@@ -35,32 +35,6 @@ jobs:
           # setup-node@v4 rejects `cache: 'none'` (see actions/setup-node PR #917).
           # Omit the field instead — package.json has no npm deps so no
           # cache is needed.
-      - name: Debug Node 22 environment (probes ci #N red)
-        if: matrix.node == 22
-        run: |
-          echo "=== node version ==="
-          node --version
-          echo "=== npm version ==="
-          npm --version
-          echo "=== process.env.CI ==="
-          echo "CI=$CI"
-          echo "GITHUB_ACTIONS=$GITHUB_ACTIONS"
-          echo "RUNNER_OS=$RUNNER_OS"
-          echo "RUNNER_TEMP=$RUNNER_TEMP"
-          echo "=== shell expansion of glob ==="
-          echo "tests/*.test.mjs count:"
-          ls tests/*.test.mjs 2>&1 | wc -l
-          echo "first 5 files bash sees:"
-          ls tests/*.test.mjs 2>&1 | head -5
-          echo "=== what node --test sees directly ==="
-          node --print "process.argv.slice(2)" --test tests/*.test.mjs || true
-          echo "=== node --test tests/ behavior ==="
-          timeout 30 node --test --test-reporter=spec tests/ 2>&1 | tail -30 || echo "(timed out or failed)"
-          echo "=== single integration test in isolation ==="
-          CI=true timeout 30 node --test --test-reporter=spec tests/integration.test.mjs 2>&1 | tail -30 || echo "(timed out or failed)"
-          echo "=== npm test under CI=true, raw output ==="
-          CI=true timeout 120 npm test -- --test-reporter=spec 2>&1 | tail -50 || echo "(timed out or failed)"
-          echo "=== done ==="
       - name: Syntax check
         run: node scripts/check-syntax.mjs
       - name: Boundary contract check
