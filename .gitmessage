@@ -1,0 +1,18 @@
+# <type>(<optional-scope>): <subject — imperative mood, ≤72 chars>
+#
+# Allowed types:
+#   feat      new user-facing capability
+#   fix       user-facing bug fix
+#   refactor  internal restructuring with no user-facing change
+#   test      adding tests or improving the test harness only
+#   docs      documentation only — README, acceptance doc, plan doc, CHANGELOG
+#   chore     tooling, build, CI, scripts, .gitignore, editorconfig
+#   perf      measurable performance improvement
+#
+# Example:
+#   feat(pipeline): add deterministic hash-checked resume
+#
+# Body — explain *why*, not *what*. Wrap at 72 columns.
+#
+# Footer — references, breaking-change notes (BREAKING CHANGE: ...).
+# Lines starting with # are ignored by scripts/check-commit-msg.mjs.

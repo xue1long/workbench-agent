@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: weekly
+    labels: [dependencies]
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /
+    schedule: weekly
+    labels: [dependencies]
+    commit-message:
+      prefix: chore(deps)
+    # NOTE: the project intentionally ships with zero runtime dependencies.
+    # Any dependabot npm PR that proposes a runtime dependency MUST be
+    # treated as a governance decision and rejected unless the project
+    # record explicitly approves adding it.
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-type: production
+    groups:
+      devDependencies:
+        dependency-type: development
+        patterns: ['*']

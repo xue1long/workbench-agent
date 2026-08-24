@@ -1,15 +1,78 @@
 {
   "name": "agent-workbench-runtime",
   "version": "0.1.0",
-  "description": "Workspace Core (M1+M2+M3+M4) for Agent Workbench — local-first, declarative, reproducible agent environment runtime.",
+  "description": "Local-first, declarative, reproducible runtime for agent environments. Orchestrates governed runs, drives a standard development pipeline with scoped knowledge, measures and evolves with explicit human approval, ingests external technology into traceable patterns, and binds everything into an evidence graph with an isolated experiment lab and a sandbox-verified package ecosystem.",
   "type": "module",
-  "private": true,
+  "main": "./src/workbench.mjs",
+  "bin": {
+    "workbench": "./src/workbench.mjs"
+  },
+  "exports": {
+    ".": "./src/workbench.mjs",
+    "./core": "./core/index.js",
+    "./adapters": "./adapters/index.js",
+    "./dashboard": "./apps/web/server.mjs"
+  },
+  "files": [
+    "src/",
+    "core/",
+    "adapters/",
+    "apps/",
+    "schemas/",
+    "fixtures/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CHANGELOG.md",
+    ".editorconfig",
+    ".gitmessage"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "start": "node src/workbench.mjs"
+    "test:once": "node --test tests/*.test.mjs --test-reporter=spec",
+    "start": "node src/workbench.mjs",
+    "dashboard": "node apps/web/server.mjs",
+    "check": "node scripts/check-syntax.mjs",
+    "format:check": "node scripts/check-format.mjs",
+    "lint:commit": "node scripts/check-commit-msg.mjs",
+    "verify": "node scripts/check-syntax.mjs && node scripts/check-format.mjs",
+    "version:check": "node scripts/check-version.mjs",
+    "release:dry-run": "node scripts/release-dry-run.mjs",
+    "ci": "node scripts/check-syntax.mjs && node --test tests/*.test.mjs"
   },
-  "dependencies": {}
+  "keywords": [
+    "agent",
+    "orchestration",
+    "pipeline",
+    "evaluation",
+    "evidence",
+    "governed",
+    "devflow",
+    "runtime",
+    "esrm"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Agent Workbench contributors",
+    "email": "workbench-agent@example.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xue1long/workbench-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xue1long/workbench-agent/issues"
+  },
+  "homepage": "https://github.com/xue1long/workbench-agent",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {}
 }

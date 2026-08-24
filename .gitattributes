@@ -1,0 +1,54 @@
+# Ensure every text file in this repository is stored as LF in git,
+# regardless of the contributor's local core.autocrlf / core.eol setting.
+# Add `binary` rules per file type when truly binary.
+
+*               text=auto eol=lf
+
+# Shell + scripts
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.zsh           text eol=lf
+
+# JS / TS / mjs (Node)
+*.js            text eol=lf
+*.cjs           text eol=lf
+*.mjs           text eol=lf
+*.ts            text eol=lf
+
+# Config + data
+*.json          text eol=lf
+*.jsonc         text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.toml          text eol=lf
+*.ini           text eol=lf
+
+# Docs
+*.md            text eol=lf
+*.markdown      text eol=lf
+
+# Web
+*.css           text eol=lf
+*.html          text eol=lf
+*.js.map        text -delta
+
+# Docs / data that must remain LF
+*.txt           text eol=lf
+*.mdx           text eol=lf
+
+# Binary — explicit to avoid any text-detection surprises
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.pdf           binary
+*.zip           binary
+*.gz            binary
+*.tgz           binary
+*.tar           binary
+
+# Test fixtures that are deterministic fixtures (kept as-is)
+fixtures/**/*.json    text eol=lf
+fixtures/**/*.yaml    text eol=lf
+fixtures/**/*.yml     text eol=lf

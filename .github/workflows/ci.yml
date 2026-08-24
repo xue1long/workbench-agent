@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  engineering:
+    name: Engineering checks (${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Use Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'none'
+      - name: Syntax check
+        run: node scripts/check-syntax.mjs
+      - name: Format check
+        run: node scripts/check-format.mjs
+      - name: Version / CHANGELOG check
+        run: node scripts/check-version.mjs
+      - name: Test (zero runtime deps; uses node built-ins only)
+        run: npm test
+      - name: Release dry-run
+        run: node scripts/release-dry-run.mjs
+
+  devflow-runtime:
+    name: DevFlow Runtime pytest (Ubuntu, Python 3.11)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: ../devflow-runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime + test deps
+        run: |
+          python -m pip install -e '.[test]'
+      - name: Pytest
+        run: python -m pytest -q
